@@ -3,11 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Trading Dashboard 2026</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>TradeTrack 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-
-<!-- Firebase SDKs -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, doc, setDoc, getDocs, query, where, orderBy }
@@ -33,486 +31,461 @@ const MESES     = ["Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const MESES_NUM = [5,6,7,8,9,10,11,12];
 const ANO       = 2026;
 
-let currentUser = null;
-let chartInstance = null;
-let abaAtual = "dashboard";
+let currentUser  = null;
+let chartInst    = null;
+let abaAtual     = "dashboard";
 
-// ── Helpers ──────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const fmtUSD  = v => `$${parseFloat(v||0).toFixed(2)}`;
-const fmtPct  = v => `${parseFloat(v||0).toFixed(2)}%`;
-const fmtSgn  = v => (v >= 0 ? "+" : "") + fmtUSD(v);
-const fmtPctS = v => (v >= 0 ? "+" : "") + fmtPct(v);
-const corCls  = v => parseFloat(v) >= 0 ? "pos" : "neg";
+const fUSD  = v => `$${Math.abs(parseFloat(v||0)).toFixed(2)}`;
+const fSgn  = v => (v>=0?"+":"-") + fUSD(v);
+const fPct  = v => (v>=0?"+":"-") + Math.abs(parseFloat(v||0)).toFixed(2) + "%";
+const isPos = v => parseFloat(v) >= 0;
 
-function toast(msg, tipo = "ok") {
-  const el = $("toast");
-  el.textContent = msg;
-  el.className = `toast show ${tipo}`;
-  setTimeout(() => el.className = "toast", 3000);
+function toast(msg, ok=true) {
+  const el=$("toast");
+  el.textContent=msg;
+  el.className=`toast ${ok?"ok":"err"} show`;
+  setTimeout(()=>el.className="toast",3200);
 }
+function setMain(html){ $("main").innerHTML=html; }
+function spin(msg="Carregando"){ setMain(`<div class="spin-wrap"><div class="spin"></div><span>${msg}</span></div>`); }
 
-function loading(msg = "Carregando...") {
-  $("main").innerHTML = `<div class="loading"><div class="spinner"></div>${msg}</div>`;
-}
-
-// ── Auth ─────────────────────────────────────────────────
-onAuthStateChanged(auth, user => {
-  currentUser = user;
-  if (user) {
-    $("login-screen").style.display = "none";
-    $("app").style.display = "block";
-    renderTabs();
-    renderDashboard();
-  } else {
-    $("login-screen").style.display = "flex";
-    $("app").style.display = "none";
-  }
+// ── Auth ─────────────────────────────────────────────
+onAuthStateChanged(auth, u=>{
+  currentUser=u;
+  if(u){ $("login-screen").style.display="none"; $("app").style.display="flex"; init(); }
+  else { $("login-screen").style.display="flex"; $("app").style.display="none"; }
 });
 
-window.fazerLogin = async () => {
-  const email = $("email").value.trim();
-  const senha = $("senha").value;
-  const btn   = $("btn-login");
-  if (!email || !senha) { toast("Preencha e-mail e senha", "err"); return; }
-  btn.disabled = true; btn.textContent = "Entrando...";
-  try {
-    await signInWithEmailAndPassword(auth, email, senha);
-  } catch (e) {
-    toast("E-mail ou senha incorretos", "err");
-    btn.disabled = false; btn.textContent = "Entrar";
-  }
+window.doLogin = async()=>{
+  const em=$("em").value.trim(), pw=$("pw").value;
+  if(!em||!pw){toast("Preencha os campos",false);return;}
+  const btn=$("lbtn"); btn.disabled=true; btn.textContent="Entrando...";
+  try{ await signInWithEmailAndPassword(auth,em,pw); }
+  catch(e){ toast("E-mail ou senha incorretos",false); btn.disabled=false; btn.textContent="Entrar"; }
 };
+window.doLogout=()=>signOut(auth);
+$("pw")&&$("pw").addEventListener("keydown",e=>e.key==="Enter"&&window.doLogin());
 
-window.fazerLogout = async () => {
-  await signOut(auth);
-};
+// ── Firestore ─────────────────────────────────────────
+async function saveOp(mes,dia,resultado,obs){
+  const id=`${ANO}-${mes}-${String(dia).padStart(2,"0")}`;
+  await setDoc(doc(db,"operacoes",id),{mes,dia,resultado:parseFloat(resultado),obs,ano:ANO,ts:new Date().toISOString()});
+}
+async function getOpsMes(mes){
+  const q=query(collection(db,"operacoes"),where("mes","==",mes),where("ano","==",ANO),orderBy("dia"));
+  return (await getDocs(q)).docs.map(d=>d.data()).sort((a,b)=>a.dia-b.dia);
+}
+async function getAllOps(){
+  const q=query(collection(db,"operacoes"),where("ano","==",ANO),orderBy("mes"),orderBy("dia"));
+  return (await getDocs(q)).docs.map(d=>d.data());
+}
 
-$("senha") && $("senha").addEventListener("keydown", e => {
-  if (e.key === "Enter") window.fazerLogin();
-});
-
-// ── Firestore ─────────────────────────────────────────────
-async function salvarOperacao(mes, dia, resultado, obs) {
-  const id = `${ANO}-${mes}-${String(dia).padStart(2,"0")}`;
-  await setDoc(doc(db, "operacoes", id), {
-    mes, dia, resultado: parseFloat(resultado), obs,
-    ano: ANO, timestamp: new Date().toISOString()
+// ── Cálculo ───────────────────────────────────────────
+function calcMes(ops,cap){
+  let saldo=cap, melhor=null, pior=null, pos=0, neg=0, hist=[];
+  ops.forEach(op=>{
+    saldo+=op.resultado;
+    if(op.resultado>0){pos++;if(melhor===null||op.resultado>melhor)melhor=op.resultado;}
+    if(op.resultado<0){neg++;if(pior===null||op.resultado<pior)pior=op.resultado;}
+    hist.push({dia:op.dia,res:op.resultado,saldo:parseFloat(saldo.toFixed(2)),obs:op.obs||""});
   });
+  const total=saldo-cap;
+  return{cap,saldo:parseFloat(saldo.toFixed(2)),total:parseFloat(total.toFixed(2)),
+    pct:parseFloat((total/cap*100).toFixed(2)),
+    melhorPct:melhor?parseFloat((melhor/cap*100).toFixed(2)):null,
+    piorPct:pior?parseFloat((pior/cap*100).toFixed(2)):null,
+    pos,neg,hist};
 }
 
-async function getOperacoesMes(mes) {
-  const q = query(
-    collection(db, "operacoes"),
-    where("mes", "==", mes),
-    where("ano", "==", ANO),
-    orderBy("dia")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map(d => d.data()).sort((a,b) => a.dia - b.dia);
+// ── Init ──────────────────────────────────────────────
+function init(){ renderTabs(); renderDashboard(); }
+
+// ── Tabs ──────────────────────────────────────────────
+function renderTabs(){
+  const all=[{id:"dashboard",label:"Overview"},...MESES.map(m=>({id:m,label:m}))];
+  $("tabs").innerHTML=all.map(t=>`<div class="tab${t.id===abaAtual?" active":""}" onclick="goTab('${t.id}')">${t.label}</div>`).join("");
 }
+window.goTab=id=>{ abaAtual=id; renderTabs(); id==="dashboard"?renderDashboard():renderMes(id); };
 
-async function getTodasOperacoes() {
-  const q = query(
-    collection(db, "operacoes"),
-    where("ano", "==", ANO),
-    orderBy("mes"), orderBy("dia")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map(d => d.data());
-}
+// ── Dashboard ─────────────────────────────────────────
+async function renderDashboard(){
+  spin();
+  const todas=await getAllOps();
+  const porMes={};
+  MESES.forEach(m=>porMes[m]=[]);
+  todas.forEach(op=>{if(porMes[op.mes])porMes[op.mes].push(op);});
 
-// ── Cálculos ──────────────────────────────────────────────
-function calcResumo(ops, capitalMes) {
-  let saldo = capitalMes;
-  let melhor = null, pior = null, pos = 0, neg = 0;
-  const historico = [];
-
-  ops.forEach(op => {
-    saldo += op.resultado;
-    if (op.resultado > 0) { pos++; if (melhor === null || op.resultado > melhor) melhor = op.resultado; }
-    if (op.resultado < 0) { neg++; if (pior   === null || op.resultado < pior)   pior   = op.resultado; }
-    historico.push({ dia: op.dia, resultado: op.resultado, saldo, obs: op.obs });
-  });
-
-  const totalRes = saldo - capitalMes;
-  return {
-    capitalMes, saldoFinal: saldo, resultado: totalRes,
-    pct: (totalRes / capitalMes) * 100,
-    melhor: melhor ? (melhor / capitalMes) * 100 : null,
-    pior:   pior   ? (pior   / capitalMes) * 100 : null,
-    pos, neg, historico
-  };
-}
-
-// ── Tabs ─────────────────────────────────────────────────
-function renderTabs() {
-  const tabs = $("tabs");
-  const itens = [{ id: "dashboard", label: "Dashboard" },
-    ...MESES.map((m, i) => ({ id: m, label: m }))];
-  tabs.innerHTML = itens.map(t =>
-    `<div class="tab ${t.id === abaAtual ? "active" : ""}" onclick="trocarAba('${t.id}')">${t.label}</div>`
-  ).join("");
-}
-
-window.trocarAba = id => {
-  abaAtual = id;
-  renderTabs();
-  if (id === "dashboard") renderDashboard();
-  else renderMes(id);
-};
-
-// ── Dashboard ─────────────────────────────────────────────
-async function renderDashboard() {
-  loading();
-  const todas = await getTodasOperacoes();
-
-  // Agrupar por mês
-  const porMes = {};
-  MESES.forEach(m => porMes[m] = []);
-  todas.forEach(op => { if (porMes[op.mes]) porMes[op.mes].push(op); });
-
-  // Calcular capital encadeado
-  let cap = CAPITAL;
-  const resumosMes = [];
-  MESES.forEach(mes => {
-    const ops = porMes[mes];
-    const r = calcResumo(ops, cap);
-    resumosMes.push({ mes, ...r });
-    if (ops.length > 0) cap = r.saldoFinal;
+  let cap=CAPITAL;
+  const resumos=[];
+  MESES.forEach(mes=>{
+    const r=calcMes(porMes[mes],cap);
+    resumos.push({mes,...r});
+    if(porMes[mes].length>0)cap=r.saldo;
   });
 
-  const totalRes = resumosMes.reduce((s,r) => s + r.resultado, 0);
-  const saldoAtual = CAPITAL + totalRes;
-  const pctTotal = (totalRes / CAPITAL) * 100;
-  const totalPos = resumosMes.reduce((s,r) => s + r.pos, 0);
-  const totalNeg = resumosMes.reduce((s,r) => s + r.neg, 0);
+  const totalRes=resumos.reduce((s,r)=>s+r.total,0);
+  const saldoAtual=parseFloat((CAPITAL+totalRes).toFixed(2));
+  const pctTotal=parseFloat((totalRes/CAPITAL*100).toFixed(2));
+  const totalPos=resumos.reduce((s,r)=>s+r.pos,0);
+  const totalNeg=resumos.reduce((s,r)=>s+r.neg,0);
+  const winrate=totalPos+totalNeg>0?((totalPos/(totalPos+totalNeg))*100).toFixed(0):0;
 
-  $("main").innerHTML = `
-    <div class="cards-grid">
-      <div class="card card-full">
-        <div class="card-label">Saldo Atual</div>
-        <div class="card-value ${corCls(totalRes)}">${fmtUSD(saldoAtual)}</div>
-        <div class="card-sub">Capital inicial: ${fmtUSD(CAPITAL)}</div>
+  setMain(`
+    <div class="section-label">VISÃO GERAL</div>
+
+    <div class="hero-card">
+      <div class="hero-left">
+        <div class="hero-label">Saldo Total</div>
+        <div class="hero-value ${isPos(totalRes)?"pos":"neg"}">${fUSD(saldoAtual)}</div>
+        <div class="hero-sub">
+          <span class="${isPos(totalRes)?"badge-pos":"badge-neg"}">${fSgn(totalRes)}</span>
+          <span class="${isPos(pctTotal)?"badge-pos":"badge-neg"}">${fPct(pctTotal)}</span>
+          <span class="badge-neu">Capital ${fUSD(CAPITAL)}</span>
+        </div>
       </div>
-      <div class="card">
-        <div class="card-label">Resultado Total</div>
-        <div class="card-value ${corCls(totalRes)}" style="font-size:18px">${fmtSgn(totalRes)}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Rentabilidade</div>
-        <div class="card-value ${corCls(pctTotal)}" style="font-size:18px">${fmtPctS(pctTotal)}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Dias Positivos</div>
-        <div class="card-value pos" style="font-size:20px">${totalPos}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Dias Negativos</div>
-        <div class="card-value neg" style="font-size:20px">${totalNeg}</div>
+      <div class="hero-right">
+        <div class="stat-mini"><div class="sm-val pos">${totalPos}</div><div class="sm-lbl">Dias +</div></div>
+        <div class="stat-mini"><div class="sm-val neg">${totalNeg}</div><div class="sm-lbl">Dias −</div></div>
+        <div class="stat-mini"><div class="sm-val acc">${winrate}%</div><div class="sm-lbl">Win Rate</div></div>
       </div>
     </div>
 
-    <div class="chart-wrap">
-      <div class="chart-title">Resultado por Mês</div>
-      <canvas id="chartDash" height="160"></canvas>
+    <div class="chart-card">
+      <div class="chart-hdr">
+        <span class="chart-title">Resultado por Mês</span>
+        <span class="chart-sub">USD</span>
+      </div>
+      <canvas id="cDash" height="140"></canvas>
     </div>
 
-    <div class="hist-card">
-      <div class="hist-header">Resumo Mensal</div>
-      ${resumosMes.map(r => `
-        <div class="mes-row" onclick="trocarAba('${r.mes}')">
-          <div class="mes-nome">${r.mes}</div>
-          <div class="mes-cap" style="color:var(--muted);font-size:11px">${fmtUSD(r.capitalMes)}</div>
-          <div class="mes-res ${corCls(r.resultado)}">${fmtSgn(r.resultado)}</div>
-          <div class="mes-pct ${corCls(r.pct)}">${fmtPctS(r.pct)}</div>
-          <div style="font-size:11px;color:var(--muted)">${r.pos}✓ ${r.neg}✗</div>
+    <div class="section-label">MESES</div>
+    <div class="table-card">
+      <div class="tbl-head">
+        <span>Mês</span><span>Capital</span><span>Saldo</span><span>Resultado</span><span>%</span><span>+/−</span>
+      </div>
+      ${resumos.map(r=>`
+        <div class="tbl-row" onclick="goTab('${r.mes}')">
+          <span class="tbl-mes">${r.mes}</span>
+          <span class="tbl-num">${fUSD(r.cap)}</span>
+          <span class="tbl-num">${r.hist.length?fUSD(r.saldo):"—"}</span>
+          <span class="tbl-num ${r.hist.length?(isPos(r.total)?"pos":"neg"):""}">${r.hist.length?fSgn(r.total):"—"}</span>
+          <span class="tbl-num ${r.hist.length?(isPos(r.pct)?"pos":"neg"):""}">${r.hist.length?fPct(r.pct):"—"}</span>
+          <span class="tbl-num">${r.hist.length?`<span class="pos">${r.pos}</span>/<span class="neg">${r.neg}</span>`:"—"}</span>
         </div>
       `).join("")}
     </div>
-  `;
+  `);
 
-  renderChart("chartDash",
-    resumosMes.map(r => r.mes),
-    resumosMes.map(r => r.resultado),
-    "Resultado ($)", true
+  drawChart("cDash",
+    resumos.map(r=>r.mes),
+    resumos.map(r=>r.hist.length?r.total:0),
+    true
   );
 }
 
-// ── Mês ──────────────────────────────────────────────────
-async function renderMes(mes) {
-  loading();
-  const mesIdx  = MESES.indexOf(mes);
-  const mnum    = MESES_NUM[mesIdx];
-  const daysInM = new Date(ANO, mnum, 0).getDate();
+// ── Mês ───────────────────────────────────────────────
+async function renderMes(mes){
+  spin();
+  const mesIdx=MESES.indexOf(mes);
+  const mnum=MESES_NUM[mesIdx];
+  const daysInM=new Date(ANO,mnum,0).getDate();
 
-  // Capital encadeado: somar resultado de meses anteriores
-  const todas = await getTodasOperacoes();
-  const porMes = {};
-  MESES.forEach(m => porMes[m] = []);
-  todas.forEach(op => { if (porMes[op.mes]) porMes[op.mes].push(op); });
+  const todas=await getAllOps();
+  const porMes={};MESES.forEach(m=>porMes[m]=[]);
+  todas.forEach(op=>{if(porMes[op.mes])porMes[op.mes].push(op);});
 
-  let capMes = CAPITAL;
-  for (let i = 0; i < mesIdx; i++) {
-    const r = calcResumo(porMes[MESES[i]], capMes);
-    if (porMes[MESES[i]].length > 0) capMes = r.saldoFinal;
+  let cap=CAPITAL;
+  for(let i=0;i<mesIdx;i++){
+    const r=calcMes(porMes[MESES[i]],cap);
+    if(porMes[MESES[i]].length>0)cap=r.saldo;
   }
+  const r=calcMes(porMes[mes],cap);
+  const avgDia=r.hist.filter(h=>h.res!==0).length
+    ? parseFloat((r.total/r.hist.filter(h=>h.res!==0).length).toFixed(2)) : 0;
 
-  const ops = porMes[mes];
-  const r   = calcResumo(ops, capMes);
+  let diasOpts="";
+  for(let i=1;i<=daysInM;i++) diasOpts+=`<option value="${i}">${String(i).padStart(2,"0")}</option>`;
 
-  // Dias select
-  let opsDias = "";
-  for (let i = 1; i <= daysInM; i++)
-    opsDias += `<option value="${i}">${String(i).padStart(2,"0")}</option>`;
+  setMain(`
+    <div class="section-label">${mes.toUpperCase()} 2026</div>
 
-  $("main").innerHTML = `
-    <div class="cards-grid">
-      <div class="card card-full">
-        <div class="card-label">Saldo do Mês</div>
-        <div class="card-value ${corCls(r.resultado)}">${fmtUSD(r.saldoFinal)}</div>
-        <div class="card-sub">Capital: ${fmtUSD(capMes)} · ${fmtSgn(r.resultado)} (${fmtPctS(r.pct)})</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Média Diária</div>
-        <div class="card-value ${corCls(r.resultado)} " style="font-size:16px">
-          ${r.historico.length ? fmtSgn(r.resultado / r.historico.filter(h=>h.resultado!==0).length||1) : "-"}
+    <div class="hero-card">
+      <div class="hero-left">
+        <div class="hero-label">Saldo do Mês</div>
+        <div class="hero-value ${isPos(r.total)?"pos":"neg"}">${fUSD(r.saldo)}</div>
+        <div class="hero-sub">
+          <span class="${isPos(r.total)?"badge-pos":"badge-neg"}">${fSgn(r.total)}</span>
+          <span class="${isPos(r.pct)?"badge-pos":"badge-neg"}">${fPct(r.pct)}</span>
         </div>
       </div>
-      <div class="card">
-        <div class="card-label">Dias +/-</div>
-        <div class="card-value" style="font-size:16px;color:var(--blue)">${r.pos}✓ ${r.neg}✗</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Melhor Dia</div>
-        <div class="card-value pos" style="font-size:14px">${r.melhor !== null ? fmtPctS(r.melhor) : "-"}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Pior Dia</div>
-        <div class="card-value neg" style="font-size:14px">${r.pior !== null ? fmtPctS(r.pior) : "-"}</div>
+      <div class="hero-right">
+        <div class="stat-mini"><div class="sm-val pos">${r.pos}</div><div class="sm-lbl">Dias +</div></div>
+        <div class="stat-mini"><div class="sm-val neg">${r.neg}</div><div class="sm-lbl">Dias −</div></div>
+        <div class="stat-mini"><div class="sm-val acc">${r.pos+r.neg>0?((r.pos/(r.pos+r.neg))*100).toFixed(0):0}%</div><div class="sm-lbl">Win</div></div>
       </div>
     </div>
 
-    ${r.historico.length ? `
-    <div class="chart-wrap">
-      <div class="chart-title">Evolução do Saldo — ${mes}</div>
-      <canvas id="chartMes" height="150"></canvas>
-    </div>` : ""}
-
-    <div class="lancar-card">
-      <div class="lancar-title"><i>⚡</i> Lançar Resultado</div>
-      <div class="form-row">
-        <label class="form-label">Dia</label>
-        <select class="form-input" id="inp-dia">${opsDias}</select>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Resultado (USD) · use − para perda</label>
-        <input class="form-input" id="inp-valor" type="number" step="0.01" placeholder="Ex: 12.50 ou -5.00">
-      </div>
-      <div class="form-row">
-        <label class="form-label">Observação (opcional)</label>
-        <input class="form-input" id="inp-obs" type="text" placeholder="Ex: 1 trade, stop ativado">
-      </div>
-      <button class="btn-primary" id="btn-lancar" onclick="lancar('${mes}')">Registrar</button>
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-lbl">Média/Dia</div><div class="kpi-val ${isPos(avgDia)?"pos":"neg"}">${fSgn(avgDia)}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Melhor Dia</div><div class="kpi-val pos">${r.melhorPct!==null?fPct(r.melhorPct):"—"}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Pior Dia</div><div class="kpi-val neg">${r.piorPct!==null?fPct(r.piorPct):"—"}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Capital</div><div class="kpi-val neu">${fUSD(cap)}</div></div>
     </div>
 
-    ${r.historico.length ? `
-    <div class="hist-card">
-      <div class="hist-header">Histórico</div>
-      ${r.historico.slice().reverse().map(h => `
-        <div class="hist-row">
-          <div class="hist-dia">Dia ${h.dia}</div>
-          <div class="hist-res ${corCls(h.resultado)}">${fmtSgn(h.resultado)}</div>
-          <div class="hist-saldo">${fmtUSD(h.saldo)}</div>
-          <div class="hist-obs">${h.obs || ""}</div>
+    ${r.hist.length?`
+    <div class="chart-card">
+      <div class="chart-hdr"><span class="chart-title">Evolução do Saldo</span><span class="chart-sub">USD</span></div>
+      <canvas id="cMes" height="130"></canvas>
+    </div>`:""}
+
+    <div class="form-card">
+      <div class="form-title">Lançar Resultado</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="flbl">Dia</label>
+          <select class="finp" id="fdia">${diasOpts}</select>
+        </div>
+        <div class="form-group">
+          <label class="flbl">Resultado (USD)</label>
+          <input class="finp" id="fval" type="number" step="0.01" placeholder="Ex: 12.50 ou -5.00">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:10px">
+        <label class="flbl">Observação</label>
+        <input class="finp" id="fobs" type="text" placeholder="Ex: 1 trade, stop ativado">
+      </div>
+      <button class="btn-submit" id="fbtn" onclick="lancar('${mes}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+        Registrar Operação
+      </button>
+    </div>
+
+    ${r.hist.length?`
+    <div class="section-label">HISTÓRICO</div>
+    <div class="table-card">
+      <div class="tbl-head">
+        <span>Dia</span><span>Resultado</span><span>Saldo</span><span>Obs</span>
+      </div>
+      ${r.hist.slice().reverse().map(h=>`
+        <div class="tbl-row">
+          <span class="tbl-dia">Dia ${h.dia}</span>
+          <span class="tbl-num ${isPos(h.res)?"pos":"neg"} mono">${fSgn(h.res)}</span>
+          <span class="tbl-num acc mono">${fUSD(h.saldo)}</span>
+          <span class="tbl-obs">${h.obs}</span>
         </div>
       `).join("")}
-    </div>` : `<div class="loading" style="padding:16px;font-size:12px">Sem lançamentos ainda</div>`}
-  `;
+    </div>`:`<div class="empty">Sem lançamentos — use o formulário acima</div>`}
+  `);
 
-  if (r.historico.length) {
-    renderChart("chartMes",
-      r.historico.map(h => `Dia ${h.dia}`),
-      r.historico.map(h => parseFloat(h.saldo.toFixed(2))),
-      "Saldo ($)", false
-    );
-  }
+  if(r.hist.length) drawChart("cMes",r.hist.map(h=>`${h.dia}`),r.hist.map(h=>h.saldo),false);
 }
 
-// ── Chart ─────────────────────────────────────────────────
-function renderChart(id, labels, data, label, isBar) {
-  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-  const ctx = $(id);
-  if (!ctx) return;
-  const pos = data[data.length - 1] >= 0;
-  chartInstance = new Chart(ctx, {
-    type: isBar ? "bar" : "line",
-    data: {
-      labels,
-      datasets: [{
-        label,
-        data,
-        borderColor: "#00d97e",
-        backgroundColor: isBar
-          ? data.map(v => v >= 0 ? "rgba(0,217,126,.75)" : "rgba(255,77,106,.75)")
-          : "transparent",
-        borderWidth: 2,
-        pointRadius: 3,
-        pointBackgroundColor: "#f0b429",
-        tension: 0.35
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: c => `$${c.parsed.y.toFixed(2)}` } }
-      },
-      scales: {
-        x: { ticks: { color: "#5a6f8a", font: { size: 10 } }, grid: { color: "#1e2d4a" } },
-        y: { ticks: { color: "#5a6f8a", font: { size: 10 }, callback: v => `$${v.toFixed(0)}` }, grid: { color: "#1e2d4a" } }
+// ── Chart ─────────────────────────────────────────────
+function drawChart(id,labels,data,isBar){
+  if(chartInst){chartInst.destroy();chartInst=null;}
+  const ctx=$(id); if(!ctx)return;
+  const colors=isBar?data.map(v=>v>=0?"rgba(14,203,129,.8)":"rgba(246,70,93,.8)"):"rgba(14,203,129,1)";
+  chartInst=new Chart(ctx,{
+    type:isBar?"bar":"line",
+    data:{labels,datasets:[{data,borderColor:isBar?undefined:"rgba(14,203,129,1)",
+      backgroundColor:colors,borderWidth:isBar?0:2,
+      pointRadius:isBar?0:3,pointBackgroundColor:"#F0B90B",tension:.35,fill:isBar?undefined:false}]},
+    options:{responsive:true,plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:c=>`$${Math.abs(c.parsed.y).toFixed(2)}`},
+        backgroundColor:"#1E2026",borderColor:"#2B2F36",borderWidth:1,
+        titleColor:"#848E9C",bodyColor:"#EAECEF"}},
+      scales:{
+        x:{ticks:{color:"#848E9C",font:{size:10,family:"IBM Plex Mono"}},grid:{color:"#1E2026"}},
+        y:{ticks:{color:"#848E9C",font:{size:10,family:"IBM Plex Mono"},callback:v=>`$${v.toFixed(0)}`},grid:{color:"#2B2F36"}}
       }
     }
   });
 }
 
-// ── Lançar ────────────────────────────────────────────────
-window.lancar = async mes => {
-  const dia    = parseInt($("inp-dia").value);
-  const valor  = parseFloat($("inp-valor").value);
-  const obs    = ($("inp-obs").value || "").trim();
-  if (isNaN(valor)) { toast("Digite um valor válido", "err"); return; }
-  const btn = $("btn-lancar");
-  btn.disabled = true; btn.textContent = "Salvando...";
-  try {
-    await salvarOperacao(mes, dia, valor, obs);
-    toast(`Dia ${dia} registrado: ${fmtSgn(valor)}`);
+// ── Lançar ────────────────────────────────────────────
+window.lancar=async mes=>{
+  const dia=parseInt($("fdia").value);
+  const val=parseFloat($("fval").value);
+  const obs=($("fobs").value||"").trim();
+  if(isNaN(val)){toast("Digite um valor válido",false);return;}
+  const btn=$("fbtn"); btn.disabled=true; btn.textContent="Salvando...";
+  try{
+    await saveOp(mes,dia,val,obs);
+    toast(`Dia ${dia} — ${fSgn(val)} registrado`);
     renderMes(mes);
-  } catch(e) {
-    toast("Erro ao salvar: " + e.message, "err");
-    btn.disabled = false; btn.textContent = "Registrar";
+  }catch(e){
+    toast("Erro: "+e.message,false);
+    btn.disabled=false; btn.textContent="Registrar Operação";
   }
 };
 </script>
-
 <style>
-*{margin:0;padding:0;box-sizing:border-box;}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 :root{
-  --bg:#090e1a;--surface:#0f1726;--surface2:#151f33;
-  --border:#1e2d4a;--gold:#f0b429;--green:#00d97e;
-  --red:#ff4d6a;--blue:#4da6ff;--text:#e8edf5;--muted:#5a6f8a;
+  --bg:#0B0E11;
+  --s1:#1E2026;
+  --s2:#2B2F36;
+  --s3:#474D57;
+  --txt:#EAECEF;
+  --muted:#848E9C;
+  --pos:#0ECB81;
+  --neg:#F6465D;
+  --acc:#F0B90B;
+  --blue:#1890FF;
+  --sans:'IBM Plex Sans',sans-serif;
+  --mono:'IBM Plex Mono',monospace;
 }
-body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden;}
+body{background:var(--bg);color:var(--txt);font-family:var(--sans);min-height:100vh;overflow-x:hidden;font-size:14px;}
 
-/* Login */
-#login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
-.login-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:32px 24px;width:100%;max-width:340px;}
-.login-logo{font-size:22px;font-weight:700;color:var(--gold);letter-spacing:-1px;margin-bottom:6px;}
-.login-logo span{color:var(--text);font-weight:400;}
-.login-sub{font-size:12px;color:var(--muted);margin-bottom:24px;}
-.login-label{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px;display:block;}
-.login-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;outline:none;margin-bottom:14px;font-family:'Inter',sans-serif;}
-.login-input:focus{border-color:var(--gold);}
-.login-btn{width:100%;background:var(--gold);color:#000;border:none;border-radius:8px;padding:12px;font-family:'Inter',sans-serif;font-size:14px;font-weight:700;cursor:pointer;}
-.login-btn:hover{opacity:.85;}
-.login-btn:disabled{opacity:.4;cursor:not-allowed;}
+/* LOGIN */
+#login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);}
+.login-wrap{width:100%;max-width:360px;padding:20px;}
+.login-logo{font-family:var(--mono);font-size:24px;font-weight:600;color:var(--acc);letter-spacing:-1px;margin-bottom:2px;}
+.login-logo span{color:var(--txt);font-weight:400;}
+.login-tagline{font-size:12px;color:var(--muted);margin-bottom:28px;}
+.login-box{background:var(--s1);border:1px solid var(--s2);border-radius:8px;padding:24px;}
+.flbl{display:block;font-size:11px;color:var(--muted);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;}
+.finp{width:100%;background:var(--bg);border:1px solid var(--s2);border-radius:6px;padding:10px 12px;color:var(--txt);font-size:13px;font-family:var(--mono);outline:none;transition:border .15s;-webkit-appearance:none;appearance:none;}
+.finp:focus{border-color:var(--acc);}
+.login-field{margin-bottom:16px;}
+.login-btn{width:100%;background:var(--acc);color:#000;border:none;border-radius:6px;padding:12px;font-family:var(--sans);font-size:14px;font-weight:700;cursor:pointer;margin-top:4px;transition:opacity .15s;}
+.login-btn:hover{opacity:.88;}
+.login-btn:disabled{opacity:.45;cursor:not-allowed;}
 
-/* App */
-#app{display:none;}
-.header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100;}
-.logo{font-size:17px;font-weight:700;color:var(--gold);letter-spacing:-0.5px;}
-.logo span{color:var(--text);font-weight:400;}
-.logout-btn{background:transparent;border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--muted);font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace;}
-.logout-btn:hover{color:var(--red);border-color:var(--red);}
-.badge-live{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--green);font-family:'JetBrains Mono',monospace;}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
-@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+/* APP SHELL */
+#app{display:none;flex-direction:column;min-height:100vh;}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 16px;height:52px;background:var(--s1);border-bottom:1px solid var(--s2);position:sticky;top:0;z-index:100;}
+.top-logo{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--acc);letter-spacing:-.5px;}
+.top-logo span{color:var(--txt);font-weight:400;}
+.top-right{display:flex;align-items:center;gap:12px;}
+.live-dot{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--pos);font-family:var(--mono);}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--pos);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.25;}}
+.out-btn{background:transparent;border:1px solid var(--s3);border-radius:4px;padding:4px 10px;color:var(--muted);font-size:11px;font-family:var(--mono);cursor:pointer;transition:all .15s;}
+.out-btn:hover{border-color:var(--neg);color:var(--neg);}
 
-.tabs{display:flex;gap:4px;padding:10px 12px;overflow-x:auto;background:var(--surface);border-bottom:1px solid var(--border);}
+.tabs{display:flex;gap:0;padding:0 12px;overflow-x:auto;background:var(--s1);border-bottom:1px solid var(--s2);}
 .tabs::-webkit-scrollbar{display:none;}
-.tab{padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;border:1px solid transparent;color:var(--muted);transition:all .15s;}
-.tab.active{background:var(--gold);color:#000;border-color:var(--gold);}
-.tab:hover:not(.active){color:var(--text);border-color:var(--border);}
+.tab{padding:12px 14px;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;color:var(--muted);border-bottom:2px solid transparent;transition:all .15s;}
+.tab.active{color:var(--acc);border-bottom-color:var(--acc);}
+.tab:hover:not(.active){color:var(--txt);}
 
-.main{padding:14px;max-width:560px;margin:0 auto;}
-.cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px;}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:13px;}
-.card-full{grid-column:1/-1;}
-.card-label{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px;}
-.card-value{font-size:21px;font-weight:700;font-family:'JetBrains Mono',monospace;letter-spacing:-1px;}
-.card-value.pos{color:var(--green);}
-.card-value.neg{color:var(--red);}
-.card-sub{font-size:11px;color:var(--muted);margin-top:3px;font-family:'JetBrains Mono',monospace;}
+.main{flex:1;padding:16px;max-width:720px;margin:0 auto;width:100%;}
 
-.chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:14px;}
-.chart-title{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-bottom:10px;letter-spacing:.06em;text-transform:uppercase;}
+/* COMPONENTS */
+.section-label{font-size:11px;font-family:var(--mono);color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;margin-top:4px;}
 
-.lancar-card{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:14px;}
-.lancar-title{font-size:13px;font-weight:700;color:var(--gold);margin-bottom:13px;}
-.form-row{margin-bottom:11px;}
-.form-label{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;display:block;}
-.form-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:9px 11px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none;-webkit-appearance:none;}
-.form-input:focus{border-color:var(--gold);}
-.btn-primary{width:100%;background:var(--gold);color:#000;border:none;border-radius:7px;padding:12px;font-family:'Inter',sans-serif;font-size:14px;font-weight:700;cursor:pointer;}
-.btn-primary:disabled{opacity:.4;cursor:not-allowed;}
+.hero-card{background:var(--s1);border:1px solid var(--s2);border-radius:8px;padding:18px 16px;display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;}
+.hero-label{font-size:11px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;}
+.hero-value{font-size:28px;font-weight:700;font-family:var(--mono);letter-spacing:-1px;margin-bottom:8px;}
+.hero-value.pos{color:var(--pos);}
+.hero-value.neg{color:var(--neg);}
+.hero-sub{display:flex;gap:6px;flex-wrap:wrap;}
+.badge-pos{background:rgba(14,203,129,.12);color:var(--pos);font-size:11px;font-family:var(--mono);padding:2px 7px;border-radius:3px;}
+.badge-neg{background:rgba(246,70,93,.12);color:var(--neg);font-size:11px;font-family:var(--mono);padding:2px 7px;border-radius:3px;}
+.badge-neu{background:var(--s2);color:var(--muted);font-size:11px;font-family:var(--mono);padding:2px 7px;border-radius:3px;}
+.hero-right{display:flex;flex-direction:column;gap:10px;align-items:flex-end;}
+.stat-mini{text-align:right;}
+.sm-val{font-size:18px;font-weight:600;font-family:var(--mono);}
+.sm-val.pos{color:var(--pos);}
+.sm-val.neg{color:var(--neg);}
+.sm-val.acc{color:var(--acc);}
+.sm-lbl{font-size:10px;color:var(--muted);font-family:var(--mono);}
 
-.hist-card{background:var(--surface);border:1px solid var(--border);border-radius:11px;overflow:hidden;margin-bottom:14px;}
-.hist-header{padding:10px 14px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;}
-.hist-row{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;border-bottom:1px solid var(--border);gap:6px;}
-.hist-row:last-child{border-bottom:none;}
-.hist-dia{color:var(--muted);font-size:11px;min-width:46px;font-family:'JetBrains Mono',monospace;}
-.hist-res{font-weight:600;font-family:'JetBrains Mono',monospace;font-size:13px;}
-.hist-res.pos{color:var(--green);}
-.hist-res.neg{color:var(--red);}
-.hist-saldo{color:var(--blue);font-size:12px;font-family:'JetBrains Mono',monospace;}
-.hist-obs{color:var(--muted);font-size:11px;text-align:right;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kpi-row{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px;}
+.kpi{background:var(--s1);border:1px solid var(--s2);border-radius:8px;padding:12px 14px;}
+.kpi-lbl{font-size:10px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+.kpi-val{font-size:16px;font-weight:600;font-family:var(--mono);}
+.kpi-val.pos{color:var(--pos);}
+.kpi-val.neg{color:var(--neg);}
+.kpi-val.neu{color:var(--txt);}
+.kpi-val.acc{color:var(--acc);}
 
-.mes-row{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;gap:6px;}
-.mes-row:last-child{border-bottom:none;}
-.mes-row:hover{background:var(--surface2);}
-.mes-nome{font-weight:700;font-size:13px;min-width:34px;}
-.mes-res,.mes-pct{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;}
-.mes-res.pos,.mes-pct.pos{color:var(--green);}
-.mes-res.neg,.mes-pct.neg{color:var(--red);}
+.chart-card{background:var(--s1);border:1px solid var(--s2);border-radius:8px;padding:16px;margin-bottom:12px;}
+.chart-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.chart-title{font-size:13px;font-weight:500;color:var(--txt);}
+.chart-sub{font-size:11px;color:var(--muted);font-family:var(--mono);}
 
-.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--muted);font-size:13px;gap:10px;font-family:'JetBrains Mono',monospace;}
-.spinner{width:15px;height:15px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg);}}
+.form-card{background:var(--s1);border:1px solid var(--s2);border-radius:8px;padding:16px;margin-bottom:12px;}
+.form-title{font-size:13px;font-weight:600;color:var(--txt);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--s2);}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.form-group{display:flex;flex-direction:column;}
+.btn-submit{width:100%;background:var(--acc);color:#000;border:none;border-radius:6px;padding:11px;font-family:var(--sans);font-size:14px;font-weight:700;cursor:pointer;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:6px;transition:opacity .15s;}
+.btn-submit:hover{opacity:.88;}
+.btn-submit:disabled{opacity:.4;cursor:not-allowed;}
 
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 18px;font-size:13px;font-family:'JetBrains Mono',monospace;z-index:999;display:none;white-space:nowrap;}
-.toast.show{display:block;animation:fadeup .25s ease;}
-.toast.ok{border-color:var(--green);color:var(--green);}
-.toast.err{border-color:var(--red);color:var(--red);}
-@keyframes fadeup{from{opacity:0;transform:translateX(-50%) translateY(8px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+.table-card{background:var(--s1);border:1px solid var(--s2);border-radius:8px;overflow:hidden;margin-bottom:12px;}
+.tbl-head{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr;padding:10px 14px;border-bottom:1px solid var(--s2);font-size:10px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;}
+.tbl-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr;padding:11px 14px;border-bottom:1px solid var(--s2);font-size:12px;cursor:pointer;transition:background .1s;}
+.tbl-row:last-child{border-bottom:none;}
+.tbl-row:hover{background:var(--s2);}
+.tbl-mes{font-weight:600;color:var(--txt);}
+.tbl-num{font-family:var(--mono);}
+.tbl-num.pos{color:var(--pos);}
+.tbl-num.neg{color:var(--neg);}
+.pos{color:var(--pos);}
+.neg{color:var(--neg);}
+.acc{color:var(--acc);}
+.mono{font-family:var(--mono);}
+
+/* Histórico mês (4 cols) */
+.table-card .tbl-head:has(.tbl-dia){ display:grid!important; grid-template-columns:60px 1fr 1fr 1fr!important; }
+.tbl-dia{font-family:var(--mono);color:var(--muted);}
+.tbl-obs{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+.empty{text-align:center;padding:32px;color:var(--muted);font-size:13px;font-family:var(--mono);}
+.spin-wrap{display:flex;align-items:center;justify-content:center;gap:10px;padding:60px;color:var(--muted);font-size:13px;font-family:var(--mono);}
+.spin{width:16px;height:16px;border:2px solid var(--s2);border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;}
+@keyframes sp{to{transform:rotate(360deg);}}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--s1);border:1px solid var(--s2);border-radius:6px;padding:10px 18px;font-size:12px;font-family:var(--mono);z-index:999;display:none;white-space:nowrap;pointer-events:none;}
+.toast.show{display:block;animation:tup .2s ease;}
+.toast.ok{border-color:var(--pos);color:var(--pos);}
+.toast.err{border-color:var(--neg);color:var(--neg);}
+@keyframes tup{from{opacity:0;transform:translateX(-50%) translateY(6px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+
+@media(max-width:480px){
+  .hero-value{font-size:22px;}
+  .tbl-head,.tbl-row{grid-template-columns:1fr 1fr 1fr 1fr!important;font-size:11px;}
+  .tbl-head span:nth-child(3),.tbl-row span:nth-child(3){display:none;}
+  .tbl-head span:nth-child(6),.tbl-row span:nth-child(6){display:none;}
+  .kpi-row{grid-template-columns:1fr 1fr;}
+  .form-grid{grid-template-columns:1fr;}
+}
 </style>
 </head>
 <body>
 
-<!-- LOGIN -->
 <div id="login-screen">
-  <div class="login-box">
+  <div class="login-wrap">
     <div class="login-logo">TRADE<span>TRACK</span></div>
-    <div class="login-sub">Diário de Trading 2026</div>
-    <label class="login-label">E-mail</label>
-    <input class="login-input" id="email" type="email" placeholder="seu@email.com" autocomplete="email">
-    <label class="login-label">Senha</label>
-    <input class="login-input" id="senha" type="password" placeholder="••••••••" autocomplete="current-password">
-    <button class="login-btn" id="btn-login" onclick="fazerLogin()">Entrar</button>
+    <div class="login-tagline">Diário de Trading · 2026</div>
+    <div class="login-box">
+      <div class="login-field">
+        <label class="flbl">E-mail</label>
+        <input class="finp" id="em" type="email" placeholder="seu@email.com" autocomplete="email">
+      </div>
+      <div class="login-field">
+        <label class="flbl">Senha</label>
+        <input class="finp" id="pw" type="password" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <button class="login-btn" id="lbtn" onclick="doLogin()">Entrar</button>
+    </div>
   </div>
 </div>
 
-<!-- APP -->
 <div id="app">
-  <div class="header">
-    <div class="logo">TRADE<span>TRACK</span></div>
-    <div style="display:flex;align-items:center;gap:10px;">
-      <div class="badge-live"><div class="dot"></div>LIVE</div>
-      <button class="logout-btn" onclick="fazerLogout()">Sair</button>
+  <div class="topbar">
+    <div class="top-logo">TRADE<span>TRACK</span></div>
+    <div class="top-right">
+      <div class="live-dot"><div class="dot"></div>LIVE</div>
+      <button class="out-btn" onclick="doLogout()">Sair</button>
     </div>
   </div>
   <div class="tabs" id="tabs"></div>
   <div class="main" id="main">
-    <div class="loading"><div class="spinner"></div>Carregando...</div>
+    <div class="spin-wrap"><div class="spin"></div>Carregando</div>
   </div>
 </div>
 
