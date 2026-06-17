@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harman Capital — Nasdaq</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, collection, doc, setDoc, getDocs, query, where, orderBy }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyASFgxGVhBnM8kHF9xSgsbBd5K7LfM4Zdc",
+  authDomain: "trading-2026-56ecc.firebaseapp.com",
+  projectId: "trading-2026-56ecc",
+  storageBucket: "trading-2026-56ecc.firebasestorage.app",
+  messagingSenderId: "246053123968",
+  appId: "1:246053123968:web:35bd66d3cd29d6e8633365"
+};
+
+const app  = initializeApp(firebaseConfig);
+const db   = getFirestore(app);
+const auth = getAuth(app);
+
+const CAPITAL   = 500;
+const MESES     = ["Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+const MESES_FULL= ["Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+const MESES_NUM = [5,6,7,8,9,10,11,12];
+const ANO       = 2026;
+
+let chartCurva = null, chartMensal = null;
+
+const $ = id => document.getElementById(id);
+const fU  = v => `US$ ${Math.abs(parseFloat(v||0)).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+const fS  = v => (v>=0?"+":"-")+" "+fU(v);
+const fP  = v => (v>=0?"+":"-")+Math.abs(parseFloat(v||0)).toFixed(2)+"%";
+const pos = v => parseFloat(v)>=0;
+
+function toast(msg,ok=true){
+  const el=$("toast"); el.textContent=msg;
+  el.className=`toast ${ok?"ok":"err"} show`;
+  setTimeout(()=>el.className="toast",3500);
+}
+
+// ── Auth ──────────────────────────────────────────────
+onAuthStateChanged(auth,u=>{
+  if(u){ $("login").style.display="none"; $("app").style.display="block"; loadAll(); }
+  else { $("login").style.display="flex"; $("app").style.display="none"; }
+});
+window.doLogin=async()=>{
+  const em=$("em").value.trim(), pw=$("pw").value;
+  if(!em||!pw){toast("Preencha os campos",false);return;}
+  const b=$("lbtn"); b.disabled=true; b.textContent="Aguarde...";
+  try{ await signInWithEmailAndPassword(auth,em,pw); }
+  catch(e){ toast("Credenciais inválidas",false); b.disabled=false; b.textContent="Acessar"; }
+};
+window.doLogout=()=>signOut(auth);
+$("pw")&&$("pw").addEventListener("keydown",e=>e.key==="Enter"&&window.doLogin());
+
+// ── Firebase ──────────────────────────────────────────
+async function saveOp(mes,dia,resultado,obs){
+  await setDoc(doc(db,"operacoes",`${ANO}-${mes}-${String(dia).padStart(2,"0")}`),
+    {mes,dia,resultado:parseFloat(resultado),obs,ano:ANO,ts:new Date().toISOString()});
+}
+async function getAllOps(){
+  const q=query(collection(db,"operacoes"),where("ano","==",ANO),orderBy("mes"),orderBy("dia"));
+  return (await getDocs(q)).docs.map(d=>d.data());
+}
+
+// ── Cálculo ───────────────────────────────────────────
+function calcMes(ops,cap){
+  let saldo=cap,melhor=null,pior=null,pos=0,neg=0,hist=[];
+  ops.forEach(op=>{
+    saldo+=op.resultado;
+    if(op.resultado>0){pos++;if(melhor===null||op.resultado>melhor)melhor=op.resultado;}
+    if(op.resultado<0){neg++;if(pior===null||op.resultado<pior)pior=op.resultado;}
+    hist.push({dia:op.dia,res:parseFloat(op.resultado.toFixed(2)),saldo:parseFloat(saldo.toFixed(2)),obs:op.obs||""});
+  });
+  const total=parseFloat((saldo-cap).toFixed(2));
+  return{cap,saldo:parseFloat(saldo.toFixed(2)),total,pct:parseFloat((total/cap*100).toFixed(2)),
+    melhorPct:melhor?parseFloat((melhor/cap*100).toFixed(2)):null,
+    piorPct:pior?parseFloat((pior/cap*100).toFixed(2)):null,
+    pos,neg,hist};
+}
+
+// ── Load All ──────────────────────────────────────────
+async function loadAll(){
+  const todas=await getAllOps();
+  const porMes={};MESES.forEach(m=>porMes[m]=[]);
+  todas.forEach(op=>{if(porMes[op.mes])porMes[op.mes].push(op);});
+
+  let cap=CAPITAL;
+  const resumos=[];
+  MESES.forEach((mes,i)=>{
+    const r=calcMes(porMes[mes],cap);
+    resumos.push({mes,full:MESES_FULL[i],...r});
+    if(porMes[mes].length>0)cap=r.saldo;
+  });
+
+  const totalRes=parseFloat(resumos.reduce((s,r)=>s+r.total,0).toFixed(2));
+  const saldoAtual=parseFloat((CAPITAL+totalRes).toFixed(2));
+  const pctTotal=parseFloat((totalRes/CAPITAL*100).toFixed(2));
+  const totalPos=resumos.reduce((s,r)=>s+r.pos,0);
+  const totalNeg=resumos.reduce((s,r)=>s+r.neg,0);
+  const wr=totalPos+totalNeg>0?((totalPos/(totalPos+totalNeg))*100).toFixed(0):0;
+  const allHist=resumos.flatMap(r=>r.hist.map(h=>({...h,mes:r.mes})));
+
+  // ── Saldo Hero ────────────────────────────────────
+  $("hero-saldo").textContent=fU(saldoAtual);
+  $("hero-res").textContent=fS(totalRes);
+  $("hero-res").className="hero-res "+(pos(totalRes)?"up":"dn");
+  $("hero-pct").textContent=fP(pctTotal);
+  $("hero-pct").className="hero-pct "+(pos(pctTotal)?"up":"dn");
+  $("hero-cap").textContent=`Capital inicial: ${fU(CAPITAL)}`;
+  const data=new Date();
+  $("hero-date").textContent=`Posição em ${data.toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})}`;
+
+  // ── KPIs ──────────────────────────────────────────
+  $("kpi-pos").textContent=totalPos;
+  $("kpi-neg").textContent=totalNeg;
+  $("kpi-wr").textContent=wr+"%";
+  const melhores=resumos.filter(r=>r.melhorPct!==null);
+  const piores=resumos.filter(r=>r.piorPct!==null);
+  $("kpi-melhor").textContent=melhores.length?fP(Math.max(...melhores.map(r=>r.melhorPct))):"—";
+  $("kpi-pior").textContent=piores.length?fP(Math.min(...piores.map(r=>r.piorPct))):"—";
+  $("kpi-ops").textContent=totalPos+totalNeg;
+
+  // ── Curva de Cota ─────────────────────────────────
+  if(allHist.length){
+    const labels=allHist.map(h=>`${h.mes} ${h.dia}`);
+    const vals=allHist.map(h=>h.saldo);
+    if(chartCurva)chartCurva.destroy();
+    chartCurva=new Chart($("chartCurva"),{
+      type:"line",
+      data:{labels,datasets:[{
+        data:vals,borderColor:"#C9A84C",borderWidth:2,
+        backgroundColor:ctx=>{
+          const g=ctx.chart.ctx.createLinearGradient(0,0,0,200);
+          g.addColorStop(0,"rgba(201,168,76,.18)");g.addColorStop(1,"rgba(201,168,76,0)");return g;
+        },
+        fill:true,pointRadius:0,tension:.35
+      }]},
+      options:{responsive:true,plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:c=>`US$ ${c.parsed.y.toFixed(2)}`},
+          backgroundColor:"#1A1A1A",borderColor:"#2E2E2E",borderWidth:1,
+          titleColor:"#888",bodyColor:"#E8D9A0"}},
+        scales:{
+          x:{ticks:{color:"#555",font:{size:10,family:"DM Mono"},maxTicksLimit:8},grid:{color:"#1E1E1E"}},
+          y:{ticks:{color:"#555",font:{size:10,family:"DM Mono"},callback:v=>`$${v.toFixed(0)}`},grid:{color:"#1E1E1E"}}
+        }
+      }
+    });
+  } else {
+    $("chartCurva").parentElement.innerHTML=`<div class="empty-chart">Sem dados ainda — registre a primeira operação abaixo</div>`;
+  }
+
+  // ── Rentabilidade Mensal ───────────────────────────
+  if(chartMensal)chartMensal.destroy();
+  chartMensal=new Chart($("chartMensal"),{
+    type:"bar",
+    data:{
+      labels:resumos.map(r=>r.mes),
+      datasets:[{
+        data:resumos.map(r=>r.hist.length?r.pct:0),
+        backgroundColor:resumos.map(r=>r.pct>=0?"rgba(201,168,76,.75)":"rgba(200,60,60,.7)"),
+        borderRadius:3,borderSkipped:false
+      }]
+    },
+    options:{responsive:true,plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:c=>`${c.parsed.y>=0?"+":""}${c.parsed.y.toFixed(2)}%`},
+        backgroundColor:"#1A1A1A",borderColor:"#2E2E2E",borderWidth:1,
+        titleColor:"#888",bodyColor:"#E8D9A0"}},
+      scales:{
+        x:{ticks:{color:"#555",font:{size:10,family:"DM Mono"}},grid:{display:false}},
+        y:{ticks:{color:"#555",font:{size:10,family:"DM Mono"},callback:v=>`${v.toFixed(1)}%`},grid:{color:"#1E1E1E"}}
+      }
+    }
+  });
+
+  // ── Tabela Mensal ─────────────────────────────────
+  $("tbl-meses").innerHTML=resumos.map((r,i)=>`
+    <tr class="trow" onclick="toggleMes('mes-${i}')">
+      <td class="tc-mes">${r.full}</td>
+      <td class="tc-num">${fU(r.cap)}</td>
+      <td class="tc-num">${r.hist.length?fU(r.saldo):"—"}</td>
+      <td class="tc-num ${r.hist.length?(pos(r.total)?"up":"dn"):""}">${r.hist.length?fS(r.total):"—"}</td>
+      <td class="tc-num ${r.hist.length?(pos(r.pct)?"up":"dn"):""}">${r.hist.length?fP(r.pct):"—"}</td>
+      <td class="tc-num">${r.hist.length?`<span class="up">${r.pos}</span> / <span class="dn">${r.neg}</span>`:"—"}</td>
+      <td class="tc-toggle">${r.hist.length?'<span class="arr">▾</span>':""}</td>
+    </tr>
+    ${r.hist.length?`
+    <tr class="mes-detail" id="mes-${i}" style="display:none">
+      <td colspan="7" style="padding:0">
+        <table class="inner-tbl">
+          <thead><tr>
+            <th>Dia</th><th>Resultado</th><th>Saldo</th><th>% do Dia</th><th>Observação</th>
+          </tr></thead>
+          <tbody>
+            ${r.hist.map(h=>`
+              <tr>
+                <td class="tc-dia">${h.dia.toString().padStart(2,"0")}/${MESES_NUM[i].toString().padStart(2,"0")}</td>
+                <td class="tc-num ${pos(h.res)?"up":"dn"}">${fS(h.res)}</td>
+                <td class="tc-num gold">${fU(h.saldo)}</td>
+                <td class="tc-num ${pos(h.res)?"up":"dn"}">${fP(h.res/r.cap*100)}</td>
+                <td class="tc-obs">${h.obs||"—"}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </td>
+    </tr>`:""}
+  `).join("");
+
+  // ── Form: preencher meses ─────────────────────────
+  $("form-mes").innerHTML=MESES.map((m,i)=>`<option value="${m}">${MESES_FULL[i]}</option>`).join("");
+  updateDias();
+}
+
+window.toggleMes=id=>{
+  const el=$(id); if(!el)return;
+  const vis=el.style.display==="table-row";
+  el.style.display=vis?"none":"table-row";
+  const arr=el.previousElementSibling.querySelector(".arr");
+  if(arr)arr.textContent=vis?"▾":"▴";
+};
+
+window.updateDias=()=>{
+  const mes=$("form-mes").value;
+  const idx=MESES.indexOf(mes);
+  const days=idx>=0?new Date(ANO,MESES_NUM[idx],0).getDate():31;
+  let html="";
+  for(let i=1;i<=days;i++) html+=`<option value="${i}">${String(i).padStart(2,"0")}</option>`;
+  $("form-dia").innerHTML=html;
+};
+
+window.lancar=async()=>{
+  const mes=$("form-mes").value;
+  const dia=parseInt($("form-dia").value);
+  const val=parseFloat($("form-val").value);
+  const obs=($("form-obs").value||"").trim();
+  if(isNaN(val)){toast("Digite um valor válido",false);return;}
+  const btn=$("form-btn"); btn.disabled=true; btn.textContent="Registrando...";
+  try{
+    await saveOp(mes,dia,val,obs);
+    toast(`${mes} ${dia} — ${fS(val)} registrado`);
+    $("form-val").value=""; $("form-obs").value="";
+    btn.disabled=false; btn.textContent="Registrar Operação";
+    await loadAll();
+  }catch(e){
+    toast("Erro: "+e.message,false);
+    btn.disabled=false; btn.textContent="Registrar Operação";
+  }
+};
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#0C0C0C;
+  --s1:#141414;
+  --s2:#1E1E1E;
+  --s3:#2E2E2E;
+  --txt:#E8E8E8;
+  --muted:#666;
+  --soft:#999;
+  --gold:#C9A84C;
+  --gold2:#E8D9A0;
+  --up:#4CAF7D;
+  --dn:#C84040;
+  --sans:'DM Sans',sans-serif;
+  --serif:'DM Serif Display',serif;
+  --mono:'DM Mono',monospace;
+}
+body{background:var(--bg);color:var(--txt);font-family:var(--sans);min-height:100vh;font-size:14px;line-height:1.6;}
+
+/* ── LOGIN ─────────────────────────────────────────── */
+#login{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.login-inner{width:100%;max-width:380px;}
+.login-mark{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;}
+.login-name{font-family:var(--serif);font-size:26px;color:var(--gold2);letter-spacing:.02em;}
+.login-tag{font-size:10px;font-family:var(--mono);color:var(--muted);letter-spacing:.12em;text-transform:uppercase;border:1px solid var(--s3);padding:2px 7px;border-radius:2px;}
+.login-sub{font-size:12px;color:var(--muted);margin-bottom:28px;font-family:var(--mono);}
+.login-box{background:var(--s1);border:1px solid var(--s2);border-radius:4px;padding:24px;}
+.flbl{display:block;font-size:10px;font-family:var(--mono);color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
+.finp{width:100%;background:var(--bg);border:1px solid var(--s3);border-radius:3px;padding:10px 12px;color:var(--txt);font-size:13px;font-family:var(--mono);outline:none;transition:border .15s;-webkit-appearance:none;}
+.finp:focus{border-color:var(--gold);}
+.fg{margin-bottom:16px;}
+.login-btn{width:100%;background:var(--gold);color:#000;border:none;border-radius:3px;padding:11px;font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer;letter-spacing:.02em;transition:opacity .15s;}
+.login-btn:hover{opacity:.88;}
+.login-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* ── APP ────────────────────────────────────────────── */
+#app{display:none;max-width:960px;margin:0 auto;padding:0 20px 60px;}
+
+/* Topbar */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 0 16px;border-bottom:1px solid var(--s2);margin-bottom:32px;position:sticky;top:0;z-index:50;background:var(--bg);}
+.top-mark{display:flex;align-items:baseline;gap:8px;}
+.top-name{font-family:var(--serif);font-size:18px;color:var(--gold2);}
+.top-sub{font-size:10px;font-family:var(--mono);color:var(--muted);letter-spacing:.1em;text-transform:uppercase;}
+.top-right{display:flex;align-items:center;gap:14px;}
+.live{display:flex;align-items:center;gap:5px;font-size:10px;font-family:var(--mono);color:var(--up);letter-spacing:.08em;}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--up);animation:p 2s infinite;}
+@keyframes p{0%,100%{opacity:1;}50%{opacity:.2;}}
+.out{background:transparent;border:1px solid var(--s3);border-radius:2px;padding:4px 10px;color:var(--muted);font-size:10px;font-family:var(--mono);cursor:pointer;letter-spacing:.06em;transition:all .15s;}
+.out:hover{border-color:var(--dn);color:var(--dn);}
+
+/* Divisores de seção */
+.sec-hdr{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+.sec-line{flex:1;height:1px;background:var(--s2);}
+.sec-label{font-size:10px;font-family:var(--mono);color:var(--muted);letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;}
+
+/* Hero */
+.hero{padding:32px 0 28px;border-bottom:1px solid var(--s2);margin-bottom:36px;}
+.hero-date{font-size:11px;font-family:var(--mono);color:var(--muted);letter-spacing:.06em;margin-bottom:8px;}
+.hero-saldo{font-family:var(--serif);font-size:clamp(36px,6vw,56px);color:var(--gold2);letter-spacing:-.02em;line-height:1;margin-bottom:10px;}
+.hero-badges{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;}
+.hero-res{font-size:15px;font-weight:500;font-family:var(--mono);}
+.hero-pct{font-size:13px;font-family:var(--mono);padding:2px 8px;border-radius:2px;}
+.hero-res.up,.hero-pct.up{color:var(--up);}
+.hero-res.dn,.hero-pct.dn{color:var(--dn);}
+.hero-pct.up{background:rgba(76,175,125,.1);}
+.hero-pct.dn{background:rgba(200,64,64,.1);}
+.hero-cap{font-size:11px;color:var(--muted);font-family:var(--mono);}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--s2);border:1px solid var(--s2);border-radius:4px;overflow:hidden;margin-bottom:36px;}
+.kpi{background:var(--s1);padding:16px 14px;}
+.kpi-lbl{font-size:10px;font-family:var(--mono);color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;}
+.kpi-val{font-size:20px;font-weight:600;font-family:var(--mono);color:var(--txt);}
+.kpi-val.up{color:var(--up);}
+.kpi-val.dn{color:var(--dn);}
+.kpi-val.gold{color:var(--gold);}
+
+/* Charts */
+.charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:36px;}
+.chart-box{background:var(--s1);border:1px solid var(--s2);border-radius:4px;padding:20px;}
+.chart-ttl{font-size:11px;font-family:var(--mono);color:var(--soft);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
+.chart-sub{font-size:10px;color:var(--muted);margin-bottom:14px;}
+.empty-chart{font-size:12px;color:var(--muted);font-family:var(--mono);padding:40px 0;text-align:center;}
+
+/* Tabela meses */
+.tbl-wrap{overflow-x:auto;margin-bottom:36px;}
+table.main-tbl{width:100%;border-collapse:collapse;}
+table.main-tbl thead tr{border-bottom:1px solid var(--s3);}
+table.main-tbl thead th{font-size:10px;font-family:var(--mono);color:var(--muted);letter-spacing:.1em;text-transform:uppercase;padding:10px 12px;text-align:right;font-weight:400;}
+table.main-tbl thead th:first-child{text-align:left;}
+.trow{border-bottom:1px solid var(--s2);cursor:pointer;transition:background .1s;}
+.trow:hover{background:var(--s1);}
+.tc-mes{padding:13px 12px;font-size:13px;font-weight:500;color:var(--txt);}
+.tc-num{padding:13px 12px;font-size:12px;font-family:var(--mono);text-align:right;color:var(--soft);}
+.tc-toggle{padding:13px 12px;text-align:center;color:var(--muted);}
+.arr{font-size:11px;transition:transform .2s;}
+.up{color:var(--up);}
+.dn{color:var(--dn);}
+.gold{color:var(--gold);}
+
+/* Inner tabela histórico */
+.mes-detail td{padding:0;}
+table.inner-tbl{width:100%;border-collapse:collapse;background:var(--bg);}
+table.inner-tbl thead th{font-size:9px;font-family:var(--mono);color:var(--muted);letter-spacing:.1em;text-transform:uppercase;padding:8px 14px;text-align:right;font-weight:400;border-bottom:1px solid var(--s2);}
+table.inner-tbl thead th:first-child{text-align:left;padding-left:24px;}
+table.inner-tbl tbody tr{border-bottom:1px solid var(--s2);}
+table.inner-tbl tbody tr:last-child{border-bottom:none;}
+.tc-dia{padding:9px 14px 9px 24px;font-size:11px;font-family:var(--mono);color:var(--muted);}
+table.inner-tbl .tc-num{font-size:11px;padding:9px 14px;}
+.tc-obs{padding:9px 14px;font-size:11px;color:var(--muted);max-width:200px;}
+
+/* Form */
+.form-box{background:var(--s1);border:1px solid var(--s2);border-radius:4px;padding:24px;margin-bottom:36px;}
+.form-ttl{font-size:12px;font-family:var(--mono);color:var(--soft);letter-spacing:.08em;text-transform:uppercase;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--s2);}
+.form-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
+.form-wide{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:18px;}
+.form-btn{background:var(--gold);color:#000;border:none;border-radius:3px;padding:11px 24px;font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em;transition:opacity .15s;}
+.form-btn:hover{opacity:.85;}
+.form-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* Footer */
+.footer{border-top:1px solid var(--s2);padding-top:20px;margin-top:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:gap;}
+.footer-name{font-family:var(--serif);font-size:14px;color:var(--muted);}
+.footer-info{font-size:10px;font-family:var(--mono);color:var(--muted);text-align:right;}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--s1);border:1px solid var(--s2);border-radius:3px;padding:10px 18px;font-size:12px;font-family:var(--mono);z-index:999;display:none;white-space:nowrap;}
+.toast.show{display:block;animation:tu .2s ease;}
+.toast.ok{border-color:var(--up);color:var(--up);}
+.toast.err{border-color:var(--dn);color:var(--dn);}
+@keyframes tu{from{opacity:0;transform:translateX(-50%) translateY(6px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+
+/* Responsive */
+@media(max-width:640px){
+  #app{padding:0 14px 48px;}
+  .charts-grid{grid-template-columns:1fr;}
+  .kpis{grid-template-columns:repeat(3,1fr);}
+  .kpi-val{font-size:16px;}
+  .form-grid{grid-template-columns:1fr 1fr;}
+  table.main-tbl thead th:nth-child(3),
+  table.main-tbl .tc-num:nth-child(3){display:none;}
+  .footer{flex-direction:column;gap:8px;text-align:center;}
+  .footer-info{text-align:center;}
+}
+@media(max-width:400px){
+  .kpis{grid-template-columns:1fr 1fr;}
+  .kpi:last-child{grid-column:1/-1;}
+  .form-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="login-inner">
+    <div class="login-mark">
+      <div class="login-name">Harman Capital</div>
+      <div class="login-tag">NASDAQ</div>
+    </div>
+    <div class="login-sub">Operações Estruturadas · 2026</div>
+    <div class="login-box">
+      <div class="fg">
+        <label class="flbl">E-mail</label>
+        <input class="finp" id="em" type="email" placeholder="gestor@harmancapital.com" autocomplete="email">
+      </div>
+      <div class="fg">
+        <label class="flbl">Senha</label>
+        <input class="finp" id="pw" type="password" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <button class="login-btn" id="lbtn" onclick="doLogin()">Acessar</button>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="top-mark">
+      <div class="top-name">Harman Capital</div>
+      <div class="top-sub">Operações Estruturadas · NASDAQ · 2026</div>
+    </div>
+    <div class="top-right">
+      <div class="live"><div class="dot"></div>LIVE</div>
+      <button class="out" onclick="doLogout()">SAIR</button>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-date" id="hero-date"></div>
+    <div class="hero-saldo" id="hero-saldo">US$ —</div>
+    <div class="hero-badges">
+      <span class="hero-res" id="hero-res">—</span>
+      <span class="hero-pct" id="hero-pct">—</span>
+    </div>
+    <div class="hero-cap" id="hero-cap"></div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="sec-hdr"><div class="sec-label">Indicadores</div><div class="sec-line"></div></div>
+  <div class="kpis">
+    <div class="kpi"><div class="kpi-lbl">Dias Positivos</div><div class="kpi-val up" id="kpi-pos">—</div></div>
+    <div class="kpi"><div class="kpi-lbl">Dias Negativos</div><div class="kpi-val dn" id="kpi-neg">—</div></div>
+    <div class="kpi"><div class="kpi-lbl">Win Rate</div><div class="kpi-val gold" id="kpi-wr">—</div></div>
+    <div class="kpi"><div class="kpi-lbl">Melhor Dia</div><div class="kpi-val up" id="kpi-melhor">—</div></div>
+    <div class="kpi"><div class="kpi-lbl">Pior Dia</div><div class="kpi-val dn" id="kpi-pior">—</div></div>
+    <div class="kpi"><div class="kpi-lbl">Total Operações</div><div class="kpi-val" id="kpi-ops">—</div></div>
+  </div>
+
+  <!-- Gráficos -->
+  <div class="sec-hdr"><div class="sec-label">Performance</div><div class="sec-line"></div></div>
+  <div class="charts-grid">
+    <div class="chart-box">
+      <div class="chart-ttl">Curva de Capital</div>
+      <div class="chart-sub">Evolução do saldo — USD</div>
+      <canvas id="chartCurva" height="160"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-ttl">Rentabilidade Mensal</div>
+      <div class="chart-sub">Variação % por mês</div>
+      <canvas id="chartMensal" height="160"></canvas>
+    </div>
+  </div>
+
+  <!-- Tabela meses -->
+  <div class="sec-hdr"><div class="sec-label">Extrato Mensal</div><div class="sec-line"></div></div>
+  <div class="tbl-wrap">
+    <table class="main-tbl">
+      <thead>
+        <tr>
+          <th style="text-align:left">Período</th>
+          <th>Capital Inicial</th>
+          <th>Saldo Final</th>
+          <th>Resultado</th>
+          <th>Rentabilidade</th>
+          <th>Operações</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbl-meses"></tbody>
+    </table>
+  </div>
+
+  <!-- Form -->
+  <div class="sec-hdr"><div class="sec-label">Registrar Operação</div><div class="sec-line"></div></div>
+  <div class="form-box">
+    <div class="form-ttl">Nova entrada — Nasdaq 2026</div>
+    <div class="form-grid">
+      <div>
+        <label class="flbl">Mês</label>
+        <select class="finp" id="form-mes" onchange="updateDias()"></select>
+      </div>
+      <div>
+        <label class="flbl">Dia</label>
+        <select class="finp" id="form-dia"></select>
+      </div>
+      <div>
+        <label class="flbl">Resultado (USD)</label>
+        <input class="finp" id="form-val" type="number" step="0.01" placeholder="12.50 ou -5.00">
+      </div>
+    </div>
+    <div class="form-wide">
+      <div>
+        <label class="flbl">Observação</label>
+        <input class="finp" id="form-obs" type="text" placeholder="Ex: Long AAPL — stop ativado no suporte">
+      </div>
+    </div>
+    <button class="form-btn" id="form-btn" onclick="lancar()">Registrar Operação</button>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-name">Harman Capital</div>
+    <div class="footer-info">
+      Operações Estruturadas em NASDAQ · Período Mai–Dez 2026<br>
+      Documento de uso interno — não constitui oferta pública de valores mobiliários
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+</body>
+</html>
