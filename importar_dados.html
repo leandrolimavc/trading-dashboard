@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Harman Capital — Importar Dados</title>
+<style>
+  body{font-family:monospace;background:#0C0C0C;color:#E8E8E8;padding:30px;max-width:600px;margin:0 auto;}
+  h2{color:#C9A84C;margin-bottom:6px;}
+  p{color:#666;font-size:13px;margin-bottom:24px;}
+  .log{background:#141414;border:1px solid #2E2E2E;border-radius:4px;padding:16px;height:360px;overflow-y:auto;font-size:12px;line-height:1.8;}
+  .ok{color:#4CAF7D;}
+  .err{color:#C84040;}
+  .warn{color:#C9A84C;}
+  .info{color:#666;}
+  button{background:#C9A84C;color:#000;border:none;border-radius:3px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin-top:16px;}
+  button:disabled{opacity:.4;cursor:not-allowed;}
+  #status{margin-top:14px;font-size:13px;color:#C9A84C;}
+</style>
+</head>
+<body>
+<h2>Harman Capital — Importação de Dados</h2>
+<p>Este script importa os dados de Maio e Junho 2026 direto para o Firestore.<br>Abra somente uma vez. Dados já existentes serão sobrescritos.</p>
+
+<div class="log" id="log"></div>
+<button id="btn" onclick="importar()">Iniciar Importação</button>
+<div id="status"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, setDoc }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getAuth, signInWithEmailAndPassword }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyASFgxGVhBnM8kHF9xSgsbBd5K7LfM4Zdc",
+  authDomain: "trading-2026-56ecc.firebaseapp.com",
+  projectId: "trading-2026-56ecc",
+  storageBucket: "trading-2026-56ecc.firebasestorage.app",
+  messagingSenderId: "246053123968",
+  appId: "1:246053123968:web:35bd66d3cd29d6e8633365"
+};
+
+const app  = initializeApp(firebaseConfig);
+const db   = getFirestore(app);
+const auth = getAuth(app);
+
+// ── DADOS COMPLETOS ────────────────────────────────────
+const OPERACOES = [
+  // ── MAIO 2026 ──
+  { mes:"Mai", dia:12, resultado:82.20,  obs:"1 trade, alvo 3 de fibo" },
+  { mes:"Mai", dia:13, resultado:-15.20, obs:"1 trade, stop" },
+  { mes:"Mai", dia:14, resultado:11.90,  obs:"1 trade, tirou na proteção" },
+  { mes:"Mai", dia:15, resultado:-45.25, obs:"3 trades, stops em todos" },
+  { mes:"Mai", dia:16, resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Mai", dia:17, resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Mai", dia:18, resultado:50.85,  obs:"1 trade, tirou na proteção do alvo 1" },
+  { mes:"Mai", dia:19, resultado:-53.80, obs:"2 stops" },
+  { mes:"Mai", dia:20, resultado:0.00,   obs:"SEM OPERAÇÕES" },
+  { mes:"Mai", dia:21, resultado:29.80,  obs:"2 trades, 1 stop e 1 gain" },
+  { mes:"Mai", dia:22, resultado:-12.15, obs:"1 trade - stop" },
+  { mes:"Mai", dia:23, resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Mai", dia:24, resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Mai", dia:25, resultado:-4.70,  obs:"1 trade - stop - feriado" },
+  { mes:"Mai", dia:26, resultado:18.10,  obs:"1 trade - gain" },
+  { mes:"Mai", dia:27, resultado:3.20,   obs:"1 TRADE - TIROU NA PROTEÇÃO" },
+  { mes:"Mai", dia:28, resultado:0.45,   obs:"1 trade tirou na proteção" },
+  { mes:"Mai", dia:29, resultado:-29.25, obs:"2 trades/stops" },
+  { mes:"Mai", dia:30, resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Mai", dia:31, resultado:0.00,   obs:"FINAL DE SEMANA" },
+
+  // ── JUNHO 2026 ──
+  { mes:"Jun", dia:1,  resultado:-4.15,  obs:"1 STOP E 1 GAIN TIROU NA PROTEÇÃO" },
+  { mes:"Jun", dia:2,  resultado:-4.80,  obs:"stop" },
+  { mes:"Jun", dia:3,  resultado:-9.00,  obs:"stop" },
+  { mes:"Jun", dia:4,  resultado:44.50,  obs:"1 trade gain segundo alvo" },
+  { mes:"Jun", dia:5,  resultado:74.90,  obs:"1 trade terceiro alvo" },
+  { mes:"Jun", dia:6,  resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Jun", dia:7,  resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Jun", dia:8,  resultado:-27.60, obs:"1 trade stop" },
+  { mes:"Jun", dia:9,  resultado:91.80,  obs:"2 trades, 1 stop na abertura e outro no segundo alvo" },
+  { mes:"Jun", dia:10, resultado:-52.45, obs:"2 STOPS" },
+  { mes:"Jun", dia:11, resultado:-31.15, obs:"1 STOP" },
+  { mes:"Jun", dia:12, resultado:-4.55,  obs:"1 STOP E 1 RETIRADO NA PROTEÇÃO" },
+  { mes:"Jun", dia:13, resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Jun", dia:14, resultado:0.00,   obs:"FINAL DE SEMANA" },
+  { mes:"Jun", dia:15, resultado:25.35,  obs:"1 trade, tirou na proteção" },
+  { mes:"Jun", dia:16, resultado:61.70,  obs:"1 trade, segundo alvo" },
+];
+
+const ANO = 2026;
+
+function log(msg, tipo="info"){
+  const el = document.getElementById("log");
+  el.innerHTML += `<div class="${tipo}">${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+window.importar = async () => {
+  const btn = document.getElementById("btn");
+  btn.disabled = true;
+
+  // Login automático — pede credenciais
+  const email = prompt("Digite seu e-mail do Firebase:");
+  const senha = prompt("Digite sua senha:");
+  if(!email || !senha){ log("Cancelado.", "warn"); btn.disabled=false; return; }
+
+  log("🔐 Autenticando...", "info");
+  try {
+    await signInWithEmailAndPassword(auth, email, senha);
+    log("✓ Autenticado com sucesso", "ok");
+  } catch(e) {
+    log("✗ Falha na autenticação: " + e.message, "err");
+    btn.disabled = false; return;
+  }
+
+  log(`\n📦 Iniciando importação de ${OPERACOES.length} registros...`, "warn");
+  let ok = 0, erros = 0;
+
+  for(const op of OPERACOES){
+    const id = `${ANO}-${op.mes}-${String(op.dia).padStart(2,"0")}`;
+    try {
+      await setDoc(doc(db, "operacoes", id), {
+        mes: op.mes,
+        dia: op.dia,
+        resultado: op.resultado,
+        obs: op.obs,
+        ano: ANO,
+        ts: new Date().toISOString()
+      });
+      const sinal = op.resultado > 0 ? "+" : op.resultado < 0 ? "" : " ";
+      log(`✓ ${op.mes} Dia ${String(op.dia).padStart(2,"0")} — ${sinal}US$ ${Math.abs(op.resultado).toFixed(2)} — ${op.obs}`, "ok");
+      ok++;
+    } catch(e) {
+      log(`✗ ${op.mes} Dia ${op.dia} — ERRO: ${e.message}`, "err");
+      erros++;
+    }
+    // pequeno delay para não sobrecarregar
+    await new Promise(r => setTimeout(r, 80));
+  }
+
+  log(`\n──────────────────────────────`, "info");
+  log(`✅ Importação concluída: ${ok} registros salvos, ${erros} erros.`, "warn");
+  document.getElementById("status").textContent = `Pronto! ${ok} registros importados. Pode fechar esta aba e abrir o app.`;
+};
+</script>
+</body>
+</html>
