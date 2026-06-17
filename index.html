@@ -199,34 +199,50 @@ async function loadAll(){
   });
 
   // ── EXTRATO MENSAL ────────────────────────────────
-  $("extrato-body").innerHTML=allResumos.map((r,i)=>`
-    <tr class="erow" onclick="toggleDetail('det-${i}',this)">
-      <td class="ec-mes">${r.full}</td>
-      <td class="ec-n ${r.hist.length?(pos(r.total)?'up':'dn')}">${r.hist.length?fS(r.total):"—"}</td>
-      <td class="ec-n ${r.hist.length?(pos(r.pct)?'up':'dn')}">${r.hist.length?fP(r.pct):"—"}</td>
-      <td class="ec-n">${r.hist.length?`<span class="up">${r.pos}</span>/<span class="dn">${r.neg}</span>`:"—"}</td>
-      <td class="ec-arr">${r.hist.length?"▾":""}</td>
-    </tr>
-    ${r.hist.length?`
-    <tr class="det-row" id="det-${i}" style="display:none">
-      <td colspan="7" style="padding:0">
-        <table class="det-tbl">
-          <thead><tr>
-            <th style="text-align:left">Data</th>
-            <th>Resultado</th><th>% do Dia</th><th>Observação</th>
-          </tr></thead>
-          <tbody>${r.hist.map(h=>`
-            <tr>
-              <td class="dt-date">${String(h.dia).padStart(2,"0")}/${String(r.mnum).padStart(2,"0")}/2026</td>
-              <td class="ec-n ${pos(h.res)?"up":"dn"}">${fS(h.res)}</td>
-              <td class="ec-n ${pos(h.res)?"up":"dn"}">${fP(h.res/r.cap*100)}</td>
-              <td class="dt-obs">${h.obs||"—"}</td>
-            </tr>`).join("")}
-          </tbody>
-        </table>
-      </td>
-    </tr>`:""}
-  `).join("");
+  $("extrato-body").innerHTML=allResumos.map(function(r,i){
+    const diasStr = r.hist.length
+      ? '<span class="up">'+r.pos+'</span>/<span class="dn">'+r.neg+'</span>'
+      : "—";
+    const resStr  = r.hist.length ? fS(r.total) : "—";
+    const pctStr  = r.hist.length ? fP(r.pct)   : "—";
+    const resCls  = r.hist.length ? (pos(r.total)?"up":"dn") : "";
+    const pctCls  = r.hist.length ? (pos(r.pct) ?"up":"dn") : "";
+
+    let detRows = "";
+    if(r.hist.length){
+      detRows = r.hist.map(function(h){
+        const hResCls = pos(h.res)?"up":"dn";
+        const hData   = String(h.dia).padStart(2,"0")+"/"+String(r.mnum).padStart(2,"0")+"/2026";
+        const hPct    = fP(h.res/r.cap*100);
+        return '<tr>'
+          +'<td class="dt-date">'+hData+'</td>'
+          +'<td class="ec-n '+hResCls+'">'+fS(h.res)+'</td>'
+          +'<td class="ec-n '+hResCls+'">'+hPct+'</td>'
+          +'<td class="dt-obs">'+(h.obs||"—")+'</td>'
+          +'</tr>';
+      }).join("");
+    }
+
+    const detBlock = r.hist.length
+      ? '<tr class="det-row" id="det-'+i+'" style="display:none">'
+        +'<td colspan="5" style="padding:0">'
+        +'<table class="det-tbl">'
+        +'<thead><tr>'
+        +'<th style="text-align:left">Data</th>'
+        +'<th>Resultado</th><th>% do Dia</th><th>Observação</th>'
+        +'</tr></thead>'
+        +'<tbody>'+detRows+'</tbody>'
+        +'</table></td></tr>'
+      : "";
+
+    return '<tr class="erow" onclick="toggleDetail('det-'+i+'',this)">'
+      +'<td class="ec-mes">'+r.full+'</td>'
+      +'<td class="ec-n '+resCls+'">'+resStr+'</td>'
+      +'<td class="ec-n '+pctCls+'">'+pctStr+'</td>'
+      +'<td class="ec-n">'+diasStr+'</td>'
+      +'<td class="ec-arr">'+(r.hist.length?"▾":"")+'</td>'
+      +'</tr>'+detBlock;
+  }).join("");
 }
 
 window.toggleDetail=(id,row)=>{
