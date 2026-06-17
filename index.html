@@ -130,12 +130,13 @@ async function loadAll(){
 
   // ── HEADER LÂMINA ────────────────────────────────
   $("lam-data").textContent=now.toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"});
-  $("lam-saldo").textContent=fU(saldoAtual);
-  $("lam-res").textContent=fS(totalRes);
+  $("lam-saldo").textContent=fP(pctTotal);
+  $("lam-res").textContent="Resultado: "+fS(totalRes);
   $("lam-res").className="lam-res "+(pos(totalRes)?"up":"dn");
   $("lam-pct").textContent=fP(pctTotal);
   $("lam-pct").className="lam-badge "+(pos(pctTotal)?"up":"dn");
-  $("lam-cap").textContent=`Capital inicial: ${fU(CAPITAL)}`;
+  $("lam-saldo").className="lam-saldo "+(pos(pctTotal)?"up":"dn");
+
 
   // ── KPIs ──────────────────────────────────────────
   $("kpi-wr").textContent=wr+"%";
@@ -201,10 +202,8 @@ async function loadAll(){
   $("extrato-body").innerHTML=allResumos.map((r,i)=>`
     <tr class="erow" onclick="toggleDetail('det-${i}',this)">
       <td class="ec-mes">${r.full}</td>
-      <td class="ec-n">${fU(r.cap)}</td>
-      <td class="ec-n">${r.hist.length?fU(r.saldo):"—"}</td>
-      <td class="ec-n ${r.hist.length?(pos(r.total)?"up":"dn"):""}">${r.hist.length?fS(r.total):"—"}</td>
-      <td class="ec-n ${r.hist.length?(pos(r.pct)?"up":"dn"):""}">${r.hist.length?fP(r.pct):"—"}</td>
+      <td class="ec-n ${r.hist.length?(pos(r.total)?'up':'dn')}">${r.hist.length?fS(r.total):"—"}</td>
+      <td class="ec-n ${r.hist.length?(pos(r.pct)?'up':'dn')}">${r.hist.length?fP(r.pct):"—"}</td>
       <td class="ec-n">${r.hist.length?`<span class="up">${r.pos}</span>/<span class="dn">${r.neg}</span>`:"—"}</td>
       <td class="ec-arr">${r.hist.length?"▾":""}</td>
     </tr>
@@ -214,13 +213,12 @@ async function loadAll(){
         <table class="det-tbl">
           <thead><tr>
             <th style="text-align:left">Data</th>
-            <th>Resultado</th><th>Saldo</th><th>% do Dia</th><th>Observação</th>
+            <th>Resultado</th><th>% do Dia</th><th>Observação</th>
           </tr></thead>
           <tbody>${r.hist.map(h=>`
             <tr>
               <td class="dt-date">${String(h.dia).padStart(2,"0")}/${String(r.mnum).padStart(2,"0")}/2026</td>
               <td class="ec-n ${pos(h.res)?"up":"dn"}">${fS(h.res)}</td>
-              <td class="ec-n gold">${fU(h.saldo)}</td>
               <td class="ec-n ${pos(h.res)?"up":"dn"}">${fP(h.res/r.cap*100)}</td>
               <td class="dt-obs">${h.obs||"—"}</td>
             </tr>`).join("")}
@@ -331,7 +329,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14p
 .lam-fund-name{font-family:var(--serif);font-size:clamp(32px,5vw,52px);color:var(--gold3);line-height:1.05;letter-spacing:-.02em;margin-bottom:6px;}
 .lam-strategy{font-size:12px;color:var(--muted);font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;margin-bottom:28px;}
 .lam-saldo-label{font-size:10px;font-family:var(--mono);color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;}
-.lam-saldo{font-family:var(--mono);font-size:clamp(28px,4vw,42px);font-weight:500;color:var(--gold2);letter-spacing:-.02em;line-height:1;margin-bottom:10px;}
+.lam-saldo{font-family:var(--mono);font-size:clamp(32px,5vw,54px);font-weight:600;letter-spacing:-.02em;line-height:1;margin-bottom:10px;}
 .lam-badges{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
 .lam-res{font-size:16px;font-weight:500;font-family:var(--mono);}
 .lam-res.up{color:var(--up);}
@@ -487,13 +485,13 @@ table.det-tbl .ec-n{font-size:11px;padding:9px 20px;}
     <div class="lam-left">
       <div class="lam-fund-name">Harman<br>Capital</div>
       <div class="lam-strategy">Operações Estruturadas em Nasdaq · 2026</div>
-      <div class="lam-saldo-label">Patrimônio Atual</div>
-      <div class="lam-saldo" id="lam-saldo">US$ —</div>
+      <div class="lam-saldo-label">Rentabilidade Acumulada</div>
+      <div class="lam-saldo" id="lam-saldo">—</div>
       <div class="lam-badges">
         <span class="lam-res" id="lam-res">—</span>
         <span class="lam-badge" id="lam-pct">—</span>
       </div>
-      <div class="lam-cap" id="lam-cap"></div>
+
     </div>
     <div class="lam-right">
       <div class="lam-info-block">
@@ -512,10 +510,7 @@ table.det-tbl .ec-n{font-size:11px;padding:9px 20px;}
         <div class="lam-info-label">Moeda Base</div>
         <div class="lam-info-val">Dólar Americano (USD)</div>
       </div>
-      <div class="lam-info-block">
-        <div class="lam-info-label">Capital Inicial</div>
-        <div class="lam-info-val">US$ 500,00</div>
-      </div>
+
     </div>
   </div>
 </div>
@@ -528,7 +523,7 @@ table.det-tbl .ec-n{font-size:11px;padding:9px 20px;}
       <div class="kpi"><div class="kpi-lbl">Win Rate</div><div class="kpi-val gold" id="kpi-wr">—</div></div>
       <div class="kpi"><div class="kpi-lbl">Dias Positivos</div><div class="kpi-val up" id="kpi-pos">—</div></div>
       <div class="kpi"><div class="kpi-lbl">Dias Negativos</div><div class="kpi-val dn" id="kpi-neg">—</div></div>
-      <div class="kpi"><div class="kpi-lbl">Total Operações</div><div class="kpi-val" id="kpi-ops">—</div></div>
+<div class="kpi"><div class="kpi-lbl">Operações Ativas</div><div class="kpi-val" id="kpi-ops">—</div></div>
       <div class="kpi"><div class="kpi-lbl">Melhor Dia</div><div class="kpi-val up sm" id="kpi-melhor">—</div></div>
       <div class="kpi"><div class="kpi-lbl">Pior Dia</div><div class="kpi-val dn sm" id="kpi-pior">—</div></div>
       <div class="kpi"><div class="kpi-lbl">Meses Ativos</div><div class="kpi-val sm" id="kpi-meses">—</div></div>
@@ -542,7 +537,7 @@ table.det-tbl .ec-n{font-size:11px;padding:9px 20px;}
     <div class="charts-grid">
       <div class="chart-box">
         <div class="chart-ttl">Curva de Capital</div>
-        <div class="chart-sub">Evolução do patrimônio em USD</div>
+        <div class="chart-sub">Variação acumulada das operações</div>
         <canvas id="chartCurva" height="180"></canvas>
       </div>
       <div class="chart-box">
