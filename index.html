@@ -199,59 +199,78 @@ async function loadAll(){
   });
 
   // ── EXTRATO MENSAL ────────────────────────────────
-  $("extrato-body").innerHTML=allResumos.map(function(r,i){
-    const diasStr = r.hist.length
-      ? '<span class="up">'+r.pos+'</span>/<span class="dn">'+r.neg+'</span>'
+  // ── EXTRATO MENSAL ──
+  const tbody = $("extrato-body");
+  tbody.innerHTML = "";
+  allResumos.forEach(function(r, i){
+    const resStr = r.hist.length ? fS(r.total) : "—";
+    const pctStr = r.hist.length ? fP(r.pct)   : "—";
+    const resCls = r.hist.length ? (pos(r.total)?"up":"dn") : "";
+    const pctCls = r.hist.length ? (pos(r.pct) ?"up":"dn") : "";
+    const diasStr= r.hist.length
+      ? "<span class='up'>"+r.pos+"</span>/<span class='dn'>"+r.neg+"</span>"
       : "—";
-    const resStr  = r.hist.length ? fS(r.total) : "—";
-    const pctStr  = r.hist.length ? fP(r.pct)   : "—";
-    const resCls  = r.hist.length ? (pos(r.total)?"up":"dn") : "";
-    const pctCls  = r.hist.length ? (pos(r.pct) ?"up":"dn") : "";
 
-    let detRows = "";
+    // Linha principal
+    const tr = document.createElement("tr");
+    tr.className = "erow";
+    tr.dataset.idx = i;
+    tr.innerHTML =
+      "<td class='ec-mes'>"+r.full+"</td>"
+      +"<td class='ec-n "+resCls+"'>"+resStr+"</td>"
+      +"<td class='ec-n "+pctCls+"'>"+pctStr+"</td>"
+      +"<td class='ec-n'>"+diasStr+"</td>"
+      +"<td class='ec-arr'>"+(r.hist.length?"▾":"")+"</td>";
+    tr.addEventListener("click", function(){ toggleRow(i); });
+    tbody.appendChild(tr);
+
+    // Linha de detalhe
     if(r.hist.length){
-      detRows = r.hist.map(function(h){
-        const hResCls = pos(h.res)?"up":"dn";
-        const hData   = String(h.dia).padStart(2,"0")+"/"+String(r.mnum).padStart(2,"0")+"/2026";
-        const hPct    = fP(h.res/r.cap*100);
-        return '<tr>'
-          +'<td class="dt-date">'+hData+'</td>'
-          +'<td class="ec-n '+hResCls+'">'+fS(h.res)+'</td>'
-          +'<td class="ec-n '+hResCls+'">'+hPct+'</td>'
-          +'<td class="dt-obs">'+(h.obs||"—")+'</td>'
-          +'</tr>';
-      }).join("");
+      const td2 = document.createElement("tr");
+      td2.className = "det-row";
+      td2.id = "det-"+i;
+      td2.style.display = "none";
+
+      let innerRows = "";
+      r.hist.forEach(function(h){
+        const hCls  = pos(h.res)?"up":"dn";
+        const hDate = String(h.dia).padStart(2,"0")+"/"+String(r.mnum).padStart(2,"0")+"/2026";
+        const hPct  = fP(h.res/r.cap*100);
+        innerRows +=
+          "<tr>"
+          +"<td class='dt-date'>"+hDate+"</td>"
+          +"<td class='ec-n "+hCls+"'>"+fS(h.res)+"</td>"
+          +"<td class='ec-n "+hCls+"'>"+hPct+"</td>"
+          +"<td class='dt-obs'>"+(h.obs||"—")+"</td>"
+          +"</tr>";
+      });
+
+      td2.innerHTML =
+        "<td colspan='5' style='padding:0'>"
+        +"<table class='det-tbl'>"
+        +"<thead><tr>"
+        +"<th style='text-align:left'>Data</th>"
+        +"<th>Resultado</th><th>% do Dia</th><th>Observação</th>"
+        +"</tr></thead>"
+        +"<tbody>"+innerRows+"</tbody>"
+        +"</table></td>";
+      tbody.appendChild(td2);
     }
-
-    const detBlock = r.hist.length
-      ? '<tr class="det-row" id="det-'+i+'" style="display:none">'
-        +'<td colspan="5" style="padding:0">'
-        +'<table class="det-tbl">'
-        +'<thead><tr>'
-        +'<th style="text-align:left">Data</th>'
-        +'<th>Resultado</th><th>% do Dia</th><th>Observação</th>'
-        +'</tr></thead>'
-        +'<tbody>'+detRows+'</tbody>'
-        +'</table></td></tr>'
-      : "";
-
-    return '<tr class="erow" onclick="toggleDetail('det-'+i+'',this)">'
-      +'<td class="ec-mes">'+r.full+'</td>'
-      +'<td class="ec-n '+resCls+'">'+resStr+'</td>'
-      +'<td class="ec-n '+pctCls+'">'+pctStr+'</td>'
-      +'<td class="ec-n">'+diasStr+'</td>'
-      +'<td class="ec-arr">'+(r.hist.length?"▾":"")+'</td>'
-      +'</tr>'+detBlock;
-  }).join("");
+  });
 }
 
-window.toggleDetail=(id,row)=>{
-  const el=$(id); if(!el)return;
-  const vis=el.style.display==="table-row";
-  el.style.display=vis?"none":"table-row";
-  const arr=row.querySelector(".ec-arr");
-  if(arr)arr.textContent=vis?"▾":"▴";
+window.toggleRow=function(i){
+  const det = $("det-"+i);
+  if(!det) return;
+  const allRows = document.querySelectorAll(".erow");
+  const row = allRows[i];
+  const vis = det.style.display === "table-row";
+  det.style.display = vis ? "none" : "table-row";
+  const arr = row ? row.querySelector(".ec-arr") : null;
+  if(arr) arr.textContent = vis ? "▾" : "▴";
 };
+
+
 
 // ── Admin: form ───────────────────────────────────────
 function preencherFormMeses(){
