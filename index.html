@@ -49,18 +49,22 @@ function toast(msg,ok=true){
 }
 
 // ── Auth ──────────────────────────────────────────────
-onAuthStateChanged(auth, u=>{
+onAuthStateChanged(auth, function(u){
   currentUser=u;
+  var adminEls = document.querySelectorAll(".admin-only");
   if(u){
     $("modal-login").style.display="none";
     $("painel-admin").style.display="block";
     $("btn-acesso").style.display="none";
     $("btn-sair").style.display="inline-flex";
+    adminEls.forEach(function(el){el.style.display="inline-flex";});
     preencherFormMeses();
+    loadAll();
   } else {
     $("painel-admin").style.display="none";
     $("btn-sair").style.display="none";
     $("btn-acesso").style.display="inline-flex";
+    adminEls.forEach(function(el){el.style.display="none";});
   }
 });
 
@@ -131,8 +135,10 @@ async function loadAll(){
   // ── HEADER LÂMINA ────────────────────────────────
   $("lam-data").textContent=now.toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"});
   $("lam-saldo").textContent=fP(pctTotal);
-  $("lam-res").textContent="Resultado: "+fS(totalRes);
+  $("lam-res").textContent=fP(pctTotal)+" acumulado";
   $("lam-res").className="lam-res "+(pos(totalRes)?"up":"dn");
+  $("lam-usd").textContent=fS(totalRes);
+  $("lam-usd").className="lam-res admin-only "+(pos(totalRes)?"up":"dn");
   $("lam-pct").textContent=fP(pctTotal);
   $("lam-pct").className="lam-badge "+(pos(pctTotal)?"up":"dn");
   $("lam-saldo").className="lam-saldo "+(pos(pctTotal)?"up":"dn");
@@ -523,7 +529,7 @@ table.det-tbl .ec-n{font-size:11px;padding:9px 20px;}
       <div class="lam-saldo-label">Rentabilidade Acumulada</div>
       <div class="lam-saldo" id="lam-saldo">—</div>
       <div class="lam-badges">
-        <span class="lam-res" id="lam-res">—</span>
+        <span class="lam-res" id="lam-res">—</span><span class="lam-res admin-only" id="lam-usd" style="display:none">—</span>
         <span class="lam-badge" id="lam-pct">—</span>
       </div>
 
