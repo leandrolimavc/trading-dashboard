@@ -223,7 +223,7 @@ async function loadAll(){
     tr.dataset.idx = i;
     tr.innerHTML =
       "<td class='ec-mes'>"+r.full+"</td>"
-      +"<td class='ec-n "+resCls+"'>"+resStr+"</td>"
+      +"<td class='ec-n admin-only' style='display:none'>"+resStr+"</td>"
       +"<td class='ec-n "+pctCls+"'>"+pctStr+"</td>"
       +"<td class='ec-n'>"+diasStr+"</td>"
       +"<td class='ec-arr'>"+(r.hist.length?"▾":"")+"</td>";
@@ -245,7 +245,7 @@ async function loadAll(){
         innerRows +=
           "<tr>"
           +"<td class='dt-date'>"+hDate+"</td>"
-          +"<td class='ec-n "+hCls+"'>"+fS(h.res)+"</td>"
+          +"<td class='ec-n admin-only "+hCls+"' style='display:none'>"+fS(h.res)+"</td>"
           +"<td class='ec-n "+hCls+"'>"+hPct+"</td>"
           +"<td class='dt-obs'>"+(h.obs||"—")+"</td>"
           +"</tr>";
@@ -256,7 +256,7 @@ async function loadAll(){
         +"<table class='det-tbl'>"
         +"<thead><tr>"
         +"<th style='text-align:left'>Data</th>"
-        +"<th>Resultado</th><th>% do Dia</th><th>Observação</th>"
+        +"<th class='admin-only' style='display:none'>Resultado</th><th>% do Dia</th><th>Observação</th>"
         +"</tr></thead>"
         +"<tbody>"+innerRows+"</tbody>"
         +"</table></td>";
@@ -599,7 +599,7 @@ table.det-tbl .ec-n{font-size:11px;padding:9px 20px;}
             <th style="text-align:left">Período</th>
             <th>Capital Inicial</th>
             <th>Saldo Final</th>
-            <th>Resultado</th>
+            <th class="admin-only" style="display:none">Resultado</th>
             <th>Rentabilidade</th>
             <th>Dias +/−</th>
             <th></th>
