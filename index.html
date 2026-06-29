@@ -157,7 +157,7 @@ async function loadAll(){
   // ── CURVA DE CAPITAL ──────────────────────────────
   if(allHist.length){
     const labels=allHist.map((_,i)=>i+1);
-    const vals  =allHist.map(h=>h.saldo);
+    const vals  =allHist.map(h=>parseFloat(((h.saldo-CAPITAL)/CAPITAL*100).toFixed(2)));
     if(chartCurva)chartCurva.destroy();
     const ctx=$("chartCurva").getContext("2d");
     const grad=ctx.createLinearGradient(0,0,0,220);
@@ -170,12 +170,12 @@ async function loadAll(){
       options:{responsive:true,plugins:{legend:{display:false},
         tooltip:{callbacks:{
           title:c=>{ const h=allHist[c[0].dataIndex]; return `Dia ${h.dia} — ${allResumos.find(r=>r.hist.includes(h))?.mes||""}`; },
-          label:c=>`Saldo: ${fU(c.parsed.y)}`},
+          label:c=>`${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(2)}%`},
           backgroundColor:"#1A1A1A",borderColor:"#2E2E2E",borderWidth:1,
           titleColor:"#888",bodyColor:"#E8D9A0"}},
         scales:{
           x:{display:false},
-          y:{ticks:{color:"#555",font:{size:10,family:"DM Mono"},callback:v=>`$${v.toFixed(0)}`},
+          y:{ticks:{color:"#555",font:{size:10,family:"DM Mono"},callback:v=>`${v>=0?'+':''}${v.toFixed(1)}%`},
              grid:{color:"#1E1E1E"}}
         }
       }
@@ -291,8 +291,10 @@ window.updateDias=()=>{
 };
 window.lancar=async()=>{
   const mes=$("f-mes").value, dia=parseInt($("f-dia").value);
-  const val=parseFloat($("f-val").value), obs=($("f-obs").value||"").trim();
-  if(isNaN(val)){toast("Digite um valor válido",false);return;}
+  const rawVal=($("f-val").value||"").trim().replace(",",".");
+  const val=parseFloat(rawVal);
+  const obs=($("f-obs").value||"").trim();
+  if(rawVal===""||isNaN(val)){toast("Digite um valor válido (ex: 12.50 ou -5.00)",false);return;}
   const btn=$("f-btn"); btn.disabled=true; btn.textContent="Salvando...";
   try{
     await saveOp(mes,dia,val,obs);
@@ -578,7 +580,7 @@ table.det-tbl .ec-n{font-size:11px;padding:9px 20px;}
     <div class="charts-grid">
       <div class="chart-box">
         <div class="chart-ttl">Curva de Capital</div>
-        <div class="chart-sub">Variação acumulada das operações</div>
+        <div class="chart-sub">Rentabilidade acumulada (%)</div>
         <canvas id="chartCurva" height="180"></canvas>
       </div>
       <div class="chart-box">
@@ -619,7 +621,7 @@ table.det-tbl .ec-n{font-size:11px;padding:9px 20px;}
         <div class="admin-grid">
           <div><label class="flbl">Mês</label><select class="finp" id="f-mes" onchange="updateDias()"></select></div>
           <div><label class="flbl">Dia</label><select class="finp" id="f-dia"></select></div>
-          <div><label class="flbl">Resultado (USD)</label><input class="finp" id="f-val" type="number" step="0.01" placeholder="12.50 ou -5.00"></div>
+          <div><label class="flbl">Resultado (USD)</label><input class="finp" id="f-val" type="text" inputmode="decimal" placeholder="12.50 ou -5.00"></div>
         </div>
         <div class="admin-wide"><label class="flbl">Observação</label><input class="finp" id="f-obs" type="text" placeholder="Ex: 1 trade, stop ativado no suporte"></div>
         <button class="admin-btn" id="f-btn" onclick="lancar()">Registrar</button>
